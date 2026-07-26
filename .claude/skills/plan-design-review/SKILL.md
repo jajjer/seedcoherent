@@ -1,0 +1,1 @@
+/Users/jacobjensen/conductor/repos/schemaawaredatagenerator/.claude/skills/gstack/plan-design-review/SKILL.md

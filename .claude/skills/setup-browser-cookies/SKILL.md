@@ -1,0 +1,1 @@
+/Users/jacobjensen/conductor/repos/schemaawaredatagenerator/.claude/skills/gstack/setup-browser-cookies/SKILL.md

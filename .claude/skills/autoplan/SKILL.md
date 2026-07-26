@@ -1,0 +1,1 @@
+/Users/jacobjensen/conductor/repos/schemaawaredatagenerator/.claude/skills/gstack/autoplan/SKILL.md

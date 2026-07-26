@@ -1,0 +1,1 @@
+/Users/jacobjensen/conductor/repos/schemaawaredatagenerator/.claude/skills/gstack/design-html/SKILL.md
