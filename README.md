@@ -20,7 +20,9 @@ everything and inserts in dependency order inside a single transaction.
 - **Referentially correct.** Children reference parents that exist. Zero orphan
   rows, including composite and self-referential foreign keys.
 - **Constraint-aware.** Respects `NOT NULL`, `UNIQUE` (single + composite),
-  enums, `varchar(n)` length, and identity/serial PKs.
+  enums, `varchar(n)` length, identity/serial PKs, and common `CHECK`
+  constraints — numeric ranges (`price > 0`), `IN (...)` sets, and
+  `char_length` bounds all shape the generated values.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
@@ -92,8 +94,8 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 
 ## How it works
 
-1. **Introspect** — reads tables, columns, PKs, unique/foreign-key constraints,
-   and enum types from `pg_catalog`.
+1. **Introspect** — reads tables, columns, PKs, unique/foreign-key/check
+   constraints, and enum types from `pg_catalog`.
 2. **Order** — topologically sorts tables so parents populate before children;
    cycles and self-references are broken and handled with a deferred pass.
 3. **Infer** — picks a value generator per column from its name and type.

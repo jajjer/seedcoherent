@@ -115,6 +115,68 @@ test("GENERATED columns are excluded from emitted columns", () => {
   assert.ok(emitted.includes("price"));
 });
 
+// ---- CHECK constraints ----
+
+test("numeric CHECK lower bound is respected (price > 0)", () => {
+  const t = table("products", {
+    columns: [idCol(), col("price", { udtName: "numeric", numericScale: 2 })],
+    primaryKey: ["id"],
+    checks: [{ expr: "(price > (0)::numeric)" }],
+  });
+  const rows = rowsFor(build(schema(t), { rows: { products: 50 }, seed: 1 }), "public.products");
+  for (const r of rows) assert.ok((r.price as number) > 0, `price ${r.price} not > 0`);
+});
+
+test("integer CHECK range is respected (rating BETWEEN 1 AND 5)", () => {
+  const t = table("reviews", {
+    columns: [idCol(), col("rating", { udtName: "int4" })],
+    primaryKey: ["id"],
+    checks: [{ expr: "((rating >= 1) AND (rating <= 5))" }],
+  });
+  const rows = rowsFor(build(schema(t), { rows: { reviews: 50 }, seed: 2 }), "public.reviews");
+  for (const r of rows) {
+    const v = r.rating as number;
+    assert.ok(v >= 1 && v <= 5, `rating ${v} outside [1,5]`);
+  }
+});
+
+test("membership CHECK confines values to the allowed set", () => {
+  const t = table("tickets", {
+    columns: [idCol(), col("state", { udtName: "text" })],
+    primaryKey: ["id"],
+    checks: [{ expr: "(state = ANY (ARRAY['open'::text, 'closed'::text]))" }],
+  });
+  const rows = rowsFor(build(schema(t), { rows: { tickets: 30 }, seed: 3 }), "public.tickets");
+  for (const r of rows) {
+    assert.ok(["open", "closed"].includes(r.state as string), `unexpected state ${r.state}`);
+  }
+});
+
+test("length CHECK forces a minimum string length", () => {
+  const t = table("codes", {
+    columns: [idCol(), col("token", { udtName: "text" })],
+    primaryKey: ["id"],
+    checks: [{ expr: "(char_length(token) >= 12)" }],
+  });
+  const rows = rowsFor(build(schema(t), { rows: { codes: 40 }, seed: 4 }), "public.codes");
+  for (const r of rows) {
+    assert.ok((r.token as string).length >= 12, `token too short: "${r.token}"`);
+  }
+});
+
+test("user column override still wins over a CHECK bound", () => {
+  const t = table("products", {
+    columns: [idCol(), col("price", { udtName: "numeric" })],
+    primaryKey: ["id"],
+    checks: [{ expr: "(price > (0)::numeric)" }],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { products: 5 }, columns: { "products.price": { value: 42 } }, seed: 1 }),
+    "public.products",
+  );
+  for (const r of rows) assert.equal(r.price, 42);
+});
+
 // ---- determinism ----
 
 test("the same seed produces byte-identical SQL", () => {

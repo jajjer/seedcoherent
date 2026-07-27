@@ -91,13 +91,14 @@ const CONSTRAINT_SQL = `
     con.conkey          AS conkey,
     con.confkey         AS confkey,
     fn.nspname          AS ref_schema,
-    fc.relname          AS ref_table
+    fc.relname          AS ref_table,
+    pg_get_expr(con.conbin, con.conrelid) AS check_expr
   FROM pg_constraint con
   JOIN pg_class c       ON c.oid = con.conrelid
   JOIN pg_namespace n   ON n.oid = c.relnamespace
   LEFT JOIN pg_class fc     ON fc.oid = con.confrelid
   LEFT JOIN pg_namespace fn ON fn.oid = fc.relnamespace
-  WHERE con.contype IN ('p', 'u', 'f')
+  WHERE con.contype IN ('p', 'u', 'f', 'c')
     AND n.nspname = ANY($1);
 `;
 
@@ -129,6 +130,7 @@ export async function introspect(client: Client, schemas: string[] = ["public"])
         primaryKey: [],
         uniques: [],
         foreignKeys: [],
+        checks: [],
       };
       tables.set(key, table);
       attnumMap.set(key, new Map());
@@ -158,6 +160,12 @@ export async function introspect(client: Client, schemas: string[] = ["public"])
     const table = tables.get(key);
     const attnums = attnumMap.get(key);
     if (!table || !attnums) continue;
+
+    if (row.contype === "c") {
+      if (row.check_expr) table.checks.push({ expr: row.check_expr });
+      continue;
+    }
+
     const cols: string[] = (row.conkey as number[]).map((n) => attnums.get(n)!).filter(Boolean);
 
     if (row.contype === "p") {

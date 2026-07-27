@@ -39,13 +39,14 @@ before(async () => {
       id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       user_id  bigint NOT NULL REFERENCES ${SCHEMA}.users(id),
       status   ${SCHEMA}.order_status NOT NULL,
-      total    numeric(10,2) NOT NULL
+      total    numeric(10,2) NOT NULL CHECK (total > 0)
     );
     CREATE TABLE ${SCHEMA}.order_items (
       order_id   bigint NOT NULL REFERENCES ${SCHEMA}.orders(id),
       line_no    int NOT NULL,
       quantity   int NOT NULL,
-      PRIMARY KEY (order_id, line_no)
+      PRIMARY KEY (order_id, line_no),
+      CHECK (quantity >= 1 AND quantity <= 100)
     );
   `);
 });
@@ -104,6 +105,17 @@ test("inserts referentially-correct data into a live database", { skip: !enabled
   for (const { s } of statuses.rows) {
     assert.ok(["pending", "paid", "shipped"].includes(s));
   }
+
+  // CHECK constraints held: total > 0 and quantity in [1, 100].
+  // (The insert transaction would have aborted otherwise, but assert directly.)
+  const badTotals = await client.query(
+    `SELECT count(*)::int AS n FROM ${SCHEMA}.orders WHERE NOT (total > 0)`,
+  );
+  assert.equal(badTotals.rows[0].n, 0);
+  const badQty = await client.query(
+    `SELECT count(*)::int AS n FROM ${SCHEMA}.order_items WHERE NOT (quantity BETWEEN 1 AND 100)`,
+  );
+  assert.equal(badQty.rows[0].n, 0);
 });
 
 test("--truncate clears and re-seeds without constraint errors", { skip: !enabled }, async () => {
