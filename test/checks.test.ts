@@ -77,6 +77,17 @@ test("membership sets intersect across constraints", () => {
   assert.deepEqual(c?.in, ["b", "c"]);
 });
 
+test("a regex match becomes a pattern bound (domain CHECK shape)", () => {
+  // A domain CHECK (VALUE ~ '^[0-9]{5}$') is rewritten to reference the column.
+  const c = parse(`(("zip")::text ~ '^[0-9]{5}$'::text)`).get("zip");
+  assert.equal(c?.pattern, "^[0-9]{5}$");
+});
+
+test("case-insensitive regex (~*) is parsed too", () => {
+  const c = parse(`((code)::text ~* '^[a-z]+$'::text)`).get("code");
+  assert.equal(c?.pattern, "^[a-z]+$");
+});
+
 test("unparseable expressions are ignored, not guessed", () => {
   // A function-call predicate we don't understand should produce no bound.
   const map = parse("(lower((email)::text) ~~ '%@example.com'::text)");

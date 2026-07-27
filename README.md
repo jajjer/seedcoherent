@@ -21,8 +21,12 @@ everything and inserts in dependency order inside a single transaction.
   rows, including composite and self-referential foreign keys.
 - **Constraint-aware.** Respects `NOT NULL`, `UNIQUE` (single + composite),
   enums, `varchar(n)` length, identity/serial PKs, and common `CHECK`
-  constraints — numeric ranges (`price > 0`), `IN (...)` sets, and
-  `char_length` bounds all shape the generated values.
+  constraints — numeric ranges (`price > 0`), `IN (...)` sets, `char_length`
+  bounds, and simple `~` regex patterns all shape the generated values.
+- **Handles real schemas.** Partitioned tables (rows are generated for the
+  parent and land in a covered partition), composite types, range types,
+  domains (with their `CHECK`s), and arrays — including `enum[]` — all generate
+  valid values instead of crashing the insert.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
@@ -163,7 +167,8 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 ## How it works
 
 1. **Introspect** — reads tables, columns, PKs, unique/foreign-key/check
-   constraints, and enum types from `pg_catalog`.
+   constraints, enum types, partition strategy + bounds, and full type
+   resolution (arrays, composites, ranges, domains) from `pg_catalog`.
 2. **Order** — topologically sorts tables so parents populate before children;
    cycles and self-references are broken and handled with a deferred pass.
 3. **Infer** — picks a value generator per column from its name and type.
@@ -194,6 +199,13 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 
 v0 — Postgres, with two modes: generate-from-scratch and subset + anonymize real
 production data into staging. On the roadmap: MySQL/SQLite and hosted generation.
+
+A few schema shapes are best-effort: single-column `RANGE`/`LIST` partition keys
+are constrained to a covered partition, but multi-column, expression, and hash
+keys fall back to unconstrained values (fine when a `DEFAULT` partition or full
+hash coverage exists). Domain/`CHECK` regexes are honored for common anchored
+patterns (character classes, quantifiers, simple alternation); anything more
+exotic (back-references, look-around) is skipped rather than guessed.
 
 ## License
 

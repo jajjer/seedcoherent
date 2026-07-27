@@ -5,7 +5,14 @@
  */
 
 import { Faker } from "@faker-js/faker";
-import type { ColumnCheck, ColumnInfo, ColumnOverride, TableInfo } from "./types.js";
+import type {
+  ColumnCheck,
+  ColumnInfo,
+  ColumnOverride,
+  PartitionInfo,
+  TableInfo,
+  TypeRef,
+} from "./types.js";
 
 export type Generator = (f: Faker) => unknown;
 
@@ -117,8 +124,14 @@ function generatorForType(col: ColumnInfo): Generator {
       return (f) => Buffer.from(f.string.alphanumeric(16));
     case "inet":
       return (f) => f.internet.ipv4();
-    case "array":
-      return (f) => f.helpers.multiple(() => f.lorem.word(), { count: { min: 0, max: 3 } });
+    case "array": {
+      const elemGen = col.elementType ? typeRefGenerator(col.elementType) : (f: Faker) => f.lorem.word();
+      return (f) => f.helpers.multiple(() => elemGen(f), { count: { min: 0, max: 3 } });
+    }
+    case "composite":
+      return compositeGenerator(col.compositeFields ?? []);
+    case "range":
+      return rangeGenerator(col.rangeSubtype);
     case "text":
     default:
       return (f) => {
@@ -126,6 +139,68 @@ function generatorForType(col: ColumnInfo): Generator {
         return max && word.length > max ? word.slice(0, max) : word;
       };
   }
+}
+
+/** Minimal ColumnInfo so a nested type (array element, composite field) can reuse generatorForType. */
+function refToColumn(ref: TypeRef): ColumnInfo {
+  return {
+    name: "",
+    udtName: ref.udtName,
+    dataType: ref.dataType,
+    enumValues: ref.enumValues,
+    nullable: false,
+    hasDefault: false,
+    defaultExpr: null,
+    isIdentity: false,
+    isGenerated: false,
+    maxLength: null,
+    numericPrecision: null,
+    numericScale: null,
+  };
+}
+
+/** A value generator for a resolved element/field type (arrays, composite fields). */
+function typeRefGenerator(ref: TypeRef): Generator {
+  return generatorForType(refToColumn(ref));
+}
+
+/**
+ * Composite (row) type: emit a Postgres record literal like `("a b",1,"x")`.
+ * Producing a valid literal string lets it flow through the ordinary string
+ * path in both the SQL and COPY emitters — Postgres coerces it to the row type.
+ */
+function compositeGenerator(fields: TypeRef[]): Generator {
+  const gens = fields.map((fld) => typeRefGenerator(fld));
+  return (f) => `(${gens.map((g) => recordField(g(f))).join(",")})`;
+}
+
+/** Format one composite field for a record literal (NULL is an empty, unquoted field). */
+function recordField(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "number") return String(v);
+  if (typeof v === "boolean") return v ? "t" : "f";
+  const s = v instanceof Date ? v.toISOString() : typeof v === "object" ? JSON.stringify(v) : String(v);
+  // Quote every scalar so commas/spaces/empties survive; escape " and \ with a backslash.
+  return `"${s.replace(/([\\"])/g, "\\$1")}"`;
+}
+
+/** Range type: emit a `[lower,upper)` literal with a coherent lower < upper. */
+function rangeGenerator(sub: TypeRef | undefined): Generator {
+  const cat = sub?.dataType;
+  return (f) => {
+    if (cat === "integer") {
+      const a = f.number.int({ min: 0, max: 100_000 });
+      return `[${a},${a + f.number.int({ min: 1, max: 1000 })})`;
+    }
+    if (cat === "decimal") {
+      const a = f.number.float({ min: 0, max: 100_000, fractionDigits: 2 });
+      return `[${a},${(a + f.number.float({ min: 1, max: 1000, fractionDigits: 2 })).toFixed(2)})`;
+    }
+    const a = f.date.past({ years: 2 });
+    const b = new Date(a.getTime() + f.number.int({ min: 1, max: 365 }) * 86_400_000);
+    if (cat === "date") return `[${a.toISOString().slice(0, 10)},${b.toISOString().slice(0, 10)})`;
+    return `["${a.toISOString()}","${b.toISOString()}")`;
+  };
 }
 
 /** Resolve a faker path like "internet.email" against a Faker instance. */
@@ -196,6 +271,12 @@ function applyCheck(base: Generator, col: ColumnInfo, check: ColumnCheck): Gener
     return (f) => f.helpers.arrayElement(values);
   }
 
+  // A regex fully dictates the string format (zip codes, product SKUs, ...).
+  if (check.pattern) {
+    const gen = patternGenerator(check.pattern);
+    if (gen) return gen;
+  }
+
   const isNumeric = col.dataType === "integer" || col.dataType === "decimal";
   if (isNumeric && (check.min !== undefined || check.max !== undefined)) {
     return boundedNumber(col, check);
@@ -231,6 +312,169 @@ function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
   return (f) => f.number.float({ min, max, fractionDigits: scale });
 }
 
+// ---- minimal regex sampler ----
+// Enough to satisfy the anchored patterns real domain/CHECK constraints use
+// (digit runs, character classes, quantifiers, simple alternation). Anything it
+// can't parse yields null, and the caller keeps the unconstrained generator.
+
+type ReNode =
+  | { t: "seq"; items: ReNode[] }
+  | { t: "alt"; opts: ReNode[] }
+  | { t: "rep"; node: ReNode; min: number; max: number }
+  | { t: "class"; chars: string[] }
+  | { t: "lit"; s: string };
+
+const MAX_REP = 4;
+
+/** Build a generator producing strings that match `pattern`, or null if unsupported. */
+function patternGenerator(pattern: string): Generator | null {
+  let src = pattern;
+  if (src.startsWith("^")) src = src.slice(1);
+  if (/[^\\]\$$|^\$$/.test(src)) src = src.slice(0, -1); // trailing, unescaped `$`
+  try {
+    const c = { s: src, i: 0 };
+    const node = parseAlt(c);
+    if (c.i !== src.length) return null; // trailing unparsed input
+    return (f) => emitNode(node, f);
+  } catch {
+    return null;
+  }
+}
+
+function parseAlt(c: { s: string; i: number }): ReNode {
+  const opts = [parseSeq(c)];
+  while (c.s[c.i] === "|") {
+    c.i++;
+    opts.push(parseSeq(c));
+  }
+  return opts.length === 1 ? opts[0] : { t: "alt", opts };
+}
+
+function parseSeq(c: { s: string; i: number }): ReNode {
+  const items: ReNode[] = [];
+  while (c.i < c.s.length && c.s[c.i] !== "|" && c.s[c.i] !== ")") {
+    items.push(parseRep(c));
+  }
+  return { t: "seq", items };
+}
+
+function parseRep(c: { s: string; i: number }): ReNode {
+  const atom = parseAtom(c);
+  const ch = c.s[c.i];
+  if (ch === "*") return (c.i++, { t: "rep", node: atom, min: 0, max: MAX_REP });
+  if (ch === "+") return (c.i++, { t: "rep", node: atom, min: 1, max: MAX_REP });
+  if (ch === "?") return (c.i++, { t: "rep", node: atom, min: 0, max: 1 });
+  if (ch === "{") {
+    const close = c.s.indexOf("}", c.i);
+    if (close === -1) throw new Error("unterminated {");
+    const body = c.s.slice(c.i + 1, close);
+    const m = body.match(/^(\d+)(,(\d*)?)?$/);
+    if (!m) throw new Error("bad quantifier");
+    const min = Number(m[1]);
+    const max = m[2] === undefined ? min : m[3] ? Number(m[3]) : min + MAX_REP;
+    c.i = close + 1;
+    return { t: "rep", node: atom, min, max };
+  }
+  return atom;
+}
+
+function parseAtom(c: { s: string; i: number }): ReNode {
+  const ch = c.s[c.i];
+  if (ch === "(") {
+    c.i++;
+    // Skip a non-capturing group marker `?:`.
+    if (c.s.startsWith("?:", c.i)) c.i += 2;
+    const inner = parseAlt(c);
+    if (c.s[c.i] !== ")") throw new Error("unbalanced (");
+    c.i++;
+    return inner;
+  }
+  if (ch === "[") return parseClass(c);
+  if (ch === "\\") return parseEscape(c);
+  if (ch === ".") return (c.i++, { t: "class", chars: expandRange("a", "z") });
+  if (ch === undefined || "*+?{}|)".includes(ch)) throw new Error("unexpected token");
+  c.i++;
+  return { t: "lit", s: ch };
+}
+
+function parseClass(c: { s: string; i: number }): ReNode {
+  c.i++; // consume [
+  let negate = false;
+  if (c.s[c.i] === "^") (negate = true), c.i++;
+  const chars: string[] = [];
+  while (c.i < c.s.length && c.s[c.i] !== "]") {
+    let lo: string;
+    if (c.s[c.i] === "\\") {
+      const esc = classEscape(c.s[c.i + 1]);
+      c.i += 2;
+      if (esc) {
+        chars.push(...esc);
+        continue;
+      }
+      lo = c.s[c.i - 1];
+    } else {
+      lo = c.s[c.i++];
+    }
+    if (c.s[c.i] === "-" && c.s[c.i + 1] !== "]" && c.i + 1 < c.s.length) {
+      const hi = c.s[c.i + 1];
+      c.i += 2;
+      chars.push(...expandRange(lo, hi));
+    } else {
+      chars.push(lo);
+    }
+  }
+  if (c.s[c.i] !== "]") throw new Error("unterminated class");
+  c.i++;
+  if (negate) {
+    const base = new Set([...expandRange("a", "z"), ...expandRange("A", "Z"), ...expandRange("0", "9")]);
+    for (const ch of chars) base.delete(ch);
+    return { t: "class", chars: [...base] };
+  }
+  return { t: "class", chars };
+}
+
+function parseEscape(c: { s: string; i: number }): ReNode {
+  const next = c.s[c.i + 1];
+  c.i += 2;
+  const cls = classEscape(next);
+  if (cls) return { t: "class", chars: cls };
+  if (next === undefined) throw new Error("trailing backslash");
+  return { t: "lit", s: next };
+}
+
+/** Character set for a class shorthand (`\d`, `\w`, `\s`), or null for a literal escape. */
+function classEscape(ch: string | undefined): string[] | null {
+  if (ch === "d") return expandRange("0", "9");
+  if (ch === "w") return [...expandRange("a", "z"), ...expandRange("A", "Z"), ...expandRange("0", "9"), "_"];
+  if (ch === "s") return [" "];
+  return null;
+}
+
+function expandRange(lo: string, hi: string): string[] {
+  const out: string[] = [];
+  for (let cc = lo.charCodeAt(0); cc <= hi.charCodeAt(0); cc++) out.push(String.fromCharCode(cc));
+  return out;
+}
+
+function emitNode(node: ReNode, f: Faker): string {
+  switch (node.t) {
+    case "seq":
+      return node.items.map((n) => emitNode(n, f)).join("");
+    case "alt":
+      return emitNode(f.helpers.arrayElement(node.opts), f);
+    case "rep": {
+      const n = f.number.int({ min: node.min, max: Math.max(node.min, node.max) });
+      let s = "";
+      for (let k = 0; k < n; k++) s += emitNode(node.node, f);
+      return s;
+    }
+    case "class":
+      return node.chars.length ? f.helpers.arrayElement(node.chars) : "";
+    case "lit":
+      return node.s;
+  }
+}
+
 /** Pad or truncate a string to satisfy length bounds (and varchar(n)). */
 function constrainLength(s: string, col: ColumnInfo, check: ColumnCheck, f: Faker): string {
   const min = check.minLength ?? 0;
@@ -241,11 +485,68 @@ function constrainLength(s: string, col: ColumnInfo, check: ColumnCheck, f: Fake
   return s;
 }
 
+/**
+ * A generator that keeps a partition-key column's value inside a partition that
+ * actually exists, so the parent-table insert routes successfully. Returns null
+ * when no constraint is needed or we can't derive one (a DEFAULT partition
+ * exists, hash partitioning, an expression key, or unparseable bounds) — the
+ * caller then falls back to the ordinary generator.
+ */
+export function partitionKeyGenerator(col: ColumnInfo, part: PartitionInfo): Generator | null {
+  // Only the first key column drives routing here; DEFAULT/hash/expression keys
+  // accept any value, so no constraint is required.
+  if (part.hasDefault || part.strategy === "hash") return null;
+  if (part.keyColumns[0] !== col.name) return null;
+
+  if (part.strategy === "list") {
+    const values = (part.list ?? []).map((v) => coerce(v, col));
+    if (values.length === 0) return null;
+    return (f) => f.helpers.arrayElement(values);
+  }
+
+  const ranges = (part.ranges ?? []).filter((r) => r.from !== null || r.to !== null);
+  if (ranges.length === 0) return null;
+  return (f) => {
+    const r = f.helpers.arrayElement(ranges);
+    return valueInRange(r.from, r.to, col, f);
+  };
+}
+
+/** Coerce a raw bound/list literal string to the column's JS value type. */
+function coerce(raw: string, col: ColumnInfo): unknown {
+  if (col.dataType === "integer" || col.dataType === "decimal") return Number(raw);
+  if (col.dataType === "boolean") return /^(t|true|1)$/i.test(raw);
+  return raw;
+}
+
+const RANGE_SPAN_MS = 1000 * 60 * 60 * 24 * 365; // ~1y fallback for open-ended time ranges
+const RANGE_SPAN_NUM = 1000;
+
+/** Generate a value within [from, to) for a RANGE partition, typed by column. */
+function valueInRange(from: string | null, to: string | null, col: ColumnInfo, f: Faker): unknown {
+  const cat = col.dataType;
+  if (cat === "timestamp" || cat === "date") {
+    const lo = from !== null ? new Date(from).getTime() : new Date(to!).getTime() - RANGE_SPAN_MS;
+    const hi = to !== null ? new Date(to!).getTime() : new Date(from!).getTime() + RANGE_SPAN_MS;
+    const d = new Date(f.number.int({ min: lo, max: Math.max(lo, hi - 1) }));
+    return cat === "date" ? d.toISOString().slice(0, 10) : d;
+  }
+  if (cat === "integer" || cat === "decimal") {
+    const lo = from !== null ? Number(from) : Number(to) - RANGE_SPAN_NUM;
+    const hi = to !== null ? Number(to) : Number(from) + RANGE_SPAN_NUM;
+    if (cat === "integer") return f.number.int({ min: Math.ceil(lo), max: Math.max(Math.ceil(lo), Math.floor(hi) - 1) });
+    return f.number.float({ min: lo, max: Math.max(lo, hi), fractionDigits: Math.min(col.numericScale ?? 2, 6) });
+  }
+  // Text (or anything else) partitioned by range: the inclusive lower bound is a
+  // valid, in-partition value — good enough without inventing an ordering.
+  return from ?? to;
+}
+
 /** Coarse guard so name heuristics don't violate the column's actual type. */
 function isCompatible(col: ColumnInfo): boolean {
-  // Name rules produce strings/numbers/dates. Reject when the column is a type
-  // that clearly can't hold text (numeric/boolean/uuid) — those fall through to
-  // the type generator instead.
-  const textOnlyUnsafe = ["integer", "decimal", "boolean", "uuid"];
-  return !textOnlyUnsafe.includes(col.dataType);
+  // Name rules produce plain strings/dates, so only apply them to columns that
+  // can actually hold one. Structured (array/composite/range/json), binary
+  // (bytea), network (inet), and scalar-only (numeric/boolean/uuid) types all
+  // fall through to their type-specific generator instead.
+  return ["text", "date", "time", "timestamp"].includes(col.dataType);
 }
