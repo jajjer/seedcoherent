@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildData } from "../src/generate.js";
+import { buildData, generateInto, CollectSink } from "../src/generate.js";
 import { toSql } from "../src/emit.js";
 import { topoSort } from "../src/graph.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
@@ -189,4 +189,37 @@ test("different seeds produce different SQL", () => {
   const s1 = toSql(build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 1 }));
   const s2 = toSql(build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 2 }));
   assert.notEqual(s1, s2);
+});
+
+// ---- streaming (generateInto / CollectSink) ----
+
+/** Drive generateInto with a CollectSink and return the materialized data. */
+async function collect(s: Schema, config: Config, batchSize?: number) {
+  const { order, cyclic } = topoSort(s);
+  const sink = new CollectSink();
+  const stats = await generateInto(s, order, cyclic, config, sink, batchSize);
+  return { data: sink.data, stats };
+}
+
+test("generateInto + CollectSink reproduces buildData exactly", async () => {
+  const config: Config = { rows: { users: 10, orders: 40 }, seed: 42 };
+  const expected = build(usersAndOrders(), config);
+  const { data } = await collect(usersAndOrders(), config);
+  assert.deepEqual(data, expected);
+});
+
+test("output is byte-identical across batch sizes", async () => {
+  const config: Config = { rows: { users: 25, orders: 100 }, seed: 7 };
+  const base = toSql(build(usersAndOrders(), config));
+  for (const batchSize of [1, 3, 100, 10000]) {
+    const { data } = await collect(usersAndOrders(), config, batchSize);
+    assert.equal(toSql(data), base, `batchSize=${batchSize} changed output`);
+  }
+});
+
+test("generateInto reports per-table kept-row counts", async () => {
+  const { stats } = await collect(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 42 }, 7);
+  const byKey = new Map(stats.map((s) => [s.table.key, s.rows]));
+  assert.equal(byKey.get("public.users"), 10);
+  assert.equal(byKey.get("public.orders"), 40);
 });
