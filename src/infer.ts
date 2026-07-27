@@ -5,7 +5,7 @@
  */
 
 import { Faker } from "@faker-js/faker";
-import type { ColumnInfo, ColumnOverride, TableInfo } from "./types.js";
+import type { ColumnCheck, ColumnInfo, ColumnOverride, TableInfo } from "./types.js";
 
 export type Generator = (f: Faker) => unknown;
 
@@ -153,17 +153,27 @@ function overrideToGenerator(o: ColumnOverride): Generator {
 /**
  * Pick the generator for a column, honoring user overrides first, then name
  * heuristics, then type. Overrides are keyed by "table.column" or bare "column".
+ * A `check` (distilled from CHECK constraints) is applied last so generated
+ * values stay inside what the database will accept.
  */
 export function inferGenerator(
   table: TableInfo,
   col: ColumnInfo,
   overrides: Record<string, ColumnOverride> = {},
+  check?: ColumnCheck,
 ): Generator {
   const qualified = overrides[`${table.name}.${col.name}`] ?? overrides[`${table.key}.${col.name}`];
   const bare = overrides[col.name];
+  // An explicit override is the user's stated intent — respect it verbatim.
   if (qualified) return overrideToGenerator(qualified);
   if (bare) return overrideToGenerator(bare);
 
+  const base = baseGenerator(table, col);
+  return check ? applyCheck(base, col, check) : base;
+}
+
+/** Name/type generator selection, before any CHECK constraint is applied. */
+function baseGenerator(table: TableInfo, col: ColumnInfo): Generator {
   // Enum columns must draw from their allowed labels regardless of the name.
   if (col.dataType === "enum") return generatorForType(col);
 
@@ -176,6 +186,59 @@ export function inferGenerator(
     }
   }
   return generatorForType(col);
+}
+
+/** Wrap a base generator so its output satisfies a column's CHECK bounds. */
+function applyCheck(base: Generator, col: ColumnInfo, check: ColumnCheck): Generator {
+  // A membership set fully determines the valid values — draw straight from it.
+  if (check.in && check.in.length > 0) {
+    const values = check.in;
+    return (f) => f.helpers.arrayElement(values);
+  }
+
+  const isNumeric = col.dataType === "integer" || col.dataType === "decimal";
+  if (isNumeric && (check.min !== undefined || check.max !== undefined)) {
+    return boundedNumber(col, check);
+  }
+
+  if (col.dataType === "text" && (check.minLength !== undefined || check.maxLength !== undefined)) {
+    return (f) => constrainLength(String(base(f)), col, check, f);
+  }
+
+  return base;
+}
+
+/** Build a number generator confined to a CHECK's inclusive/exclusive bounds. */
+function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
+  const SPAN = 1000;
+  if (col.dataType === "integer") {
+    let lo = check.min !== undefined ? Math.ceil(check.min) + (check.minExclusive ? 1 : 0) : undefined;
+    let hi = check.max !== undefined ? Math.floor(check.max) - (check.maxExclusive ? 1 : 0) : undefined;
+    if (lo === undefined) lo = hi! - SPAN;
+    if (hi === undefined) hi = lo + SPAN;
+    if (lo > hi) hi = lo;
+    const [min, max] = [lo, hi];
+    return (f) => f.number.int({ min, max });
+  }
+  const scale = Math.min(col.numericScale ?? 2, 6);
+  const eps = Math.pow(10, -scale);
+  let lo = check.min !== undefined ? check.min + (check.minExclusive ? eps : 0) : undefined;
+  let hi = check.max !== undefined ? check.max - (check.maxExclusive ? eps : 0) : undefined;
+  if (lo === undefined) lo = Math.min(0, hi!);
+  if (hi === undefined) hi = lo + SPAN;
+  if (lo > hi) hi = lo;
+  const [min, max] = [lo, hi];
+  return (f) => f.number.float({ min, max, fractionDigits: scale });
+}
+
+/** Pad or truncate a string to satisfy length bounds (and varchar(n)). */
+function constrainLength(s: string, col: ColumnInfo, check: ColumnCheck, f: Faker): string {
+  const min = check.minLength ?? 0;
+  let max = check.maxLength ?? Infinity;
+  if (col.maxLength) max = Math.min(max, col.maxLength);
+  while (s.length < min) s += f.string.alpha(min - s.length);
+  if (s.length > max) s = s.slice(0, max);
+  return s;
 }
 
 /** Coarse guard so name heuristics don't violate the column's actual type. */

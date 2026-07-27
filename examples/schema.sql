@@ -24,7 +24,7 @@ CREATE TABLE products (
   id            SERIAL PRIMARY KEY,
   name          TEXT NOT NULL,
   description   TEXT,
-  price         NUMERIC(10, 2) NOT NULL,
+  price         NUMERIC(10, 2) NOT NULL CHECK (price > 0),
   category_id   INTEGER NOT NULL REFERENCES categories(id),
   in_stock      BOOLEAN NOT NULL DEFAULT TRUE,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -42,7 +42,7 @@ CREATE TABLE orders (
 CREATE TABLE order_items (
   order_id      INTEGER NOT NULL REFERENCES orders(id),
   product_id    INTEGER NOT NULL REFERENCES products(id),
-  quantity      INTEGER NOT NULL,
+  quantity      INTEGER NOT NULL CHECK (quantity BETWEEN 1 AND 100),
   unit_price    NUMERIC(10, 2) NOT NULL,
   PRIMARY KEY (order_id, product_id)
 );

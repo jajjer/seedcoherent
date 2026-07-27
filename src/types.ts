@@ -32,6 +32,31 @@ export interface ForeignKey {
   refColumns: string[];
 }
 
+/** A table-level CHECK constraint, stored as its normalized expression text. */
+export interface CheckConstraint {
+  /** The expression from `pg_get_expr`, e.g. "(price > (0)::numeric)". */
+  expr: string;
+}
+
+/**
+ * Per-column bounds distilled from CHECK constraints, used to keep generated
+ * values inside what the database will accept. Only the patterns we can parse
+ * reliably are represented; anything else is left unconstrained.
+ */
+export interface ColumnCheck {
+  /** Allowed value set, from `col IN (...)` / `col = ANY (ARRAY[...])`. */
+  in?: (string | number)[];
+  /** Inclusive-by-default numeric lower bound. */
+  min?: number;
+  /** Inclusive-by-default numeric upper bound. */
+  max?: number;
+  minExclusive?: boolean;
+  maxExclusive?: boolean;
+  /** Bounds from `char_length(col)` / `length(col)` comparisons. */
+  minLength?: number;
+  maxLength?: number;
+}
+
 export interface TableInfo {
   schema: string;
   name: string;
@@ -42,6 +67,8 @@ export interface TableInfo {
   /** Each unique constraint is a set of column names. */
   uniques: string[][];
   foreignKeys: ForeignKey[];
+  /** Table CHECK constraints, as raw expression text (parsed in checks.ts). */
+  checks: CheckConstraint[];
 }
 
 export interface Schema {

@@ -1,7 +1,7 @@
 /** Test helpers: build in-memory Schema/Table/Column objects without a live DB. */
 
 import { categorize } from "../src/introspect.js";
-import type { ColumnInfo, ForeignKey, Schema, TableInfo } from "../src/types.js";
+import type { CheckConstraint, ColumnInfo, ForeignKey, Schema, TableInfo } from "../src/types.js";
 
 export interface ColOpts extends Partial<Omit<ColumnInfo, "name">> {}
 
@@ -36,6 +36,7 @@ export interface TableOpts {
   primaryKey?: string[];
   uniques?: string[][];
   foreignKeys?: ForeignKey[];
+  checks?: CheckConstraint[];
 }
 
 export function table(name: string, opts: TableOpts): TableInfo {
@@ -48,6 +49,7 @@ export function table(name: string, opts: TableOpts): TableInfo {
     primaryKey: opts.primaryKey ?? [],
     uniques: opts.uniques ?? [],
     foreignKeys: opts.foreignKeys ?? [],
+    checks: opts.checks ?? [],
   };
 }
 
