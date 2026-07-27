@@ -101,6 +101,22 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
    and de-duplicating uniques.
 5. **Emit** — inserts in dependency order in one transaction, or writes SQL.
 
+## Tests
+
+```bash
+npm test          # unit tests — no database required
+```
+
+The suite covers the pure logic end-to-end: FK topological ordering, name/type
+inference and overrides, SQL-literal formatting, config parsing, and seeded
+determinism. A live-database integration test (real introspect → generate →
+insert, then asserts zero orphan rows) runs only when `DATABASE_URL` is set:
+
+```bash
+docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
+```
+
 ## Status
 
 v0 — Postgres, generate-from-scratch. On the roadmap: subset + anonymize real
