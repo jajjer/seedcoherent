@@ -59,6 +59,41 @@ Connection string comes from the first argument or `DATABASE_URL`.
 | `-o, --out <file>` | Write SQL to a file instead of inserting |
 | `--print` | Print SQL to stdout |
 | `--truncate` | `TRUNCATE ... RESTART IDENTITY CASCADE` before inserting |
+| `--subset <table=n...>` | Subset + anonymize real data (see below) |
+| `--to <connection>` | Target DB to insert the anonymized subset into |
+
+## Subset + anonymize real data
+
+Point `seedcoherent` at a **real** database, pull a small, referentially-complete
+slice of it, and scrub the PII on the way out — perfect for filling a staging or
+CI database with realistic-but-fake data.
+
+```bash
+# 500 orders and *everything they reference* (users, products, categories…),
+# anonymized, inserted into a separate staging DB.
+npx seedcoherent $PROD_URL --subset orders=500 --to $STAGING_URL --seed 42
+
+# Or write it to a file / stdout instead of a live target.
+npx seedcoherent $PROD_URL --subset orders=500 -o staging-seed.sql
+```
+
+How it works:
+
+1. **Seed** — take up to `n` rows from each root table in `--subset`.
+2. **Close** — walk foreign keys *upward* to a fixpoint so every referenced
+   parent row is pulled in too. The resulting slice has zero dangling FKs,
+   including composite and self-referential keys.
+3. **Anonymize** — every non-key column is replaced using the same name/type
+   inference that powers generation (`email` → fake email, `first_name` → fake
+   name, …). The same original value always maps to the same fake within a
+   column, so internal duplicates stay consistent and `UNIQUE` columns stay
+   unique. `NULL`s are preserved.
+
+To keep the join graph intact, **key columns are passed through verbatim** —
+primary keys, foreign-key columns, and any column referenced by a foreign key.
+(So a natural key that is itself PII, e.g. an email used as a primary key, is
+*not* anonymized; use surrogate keys if that matters.) Anonymized data is never
+written back to the source — a subset run requires `--to`, `--out`, or `--print`.
 
 ## Config file
 
@@ -121,8 +156,8 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 
 ## Status
 
-v0 — Postgres, generate-from-scratch. On the roadmap: subset + anonymize real
-production data into staging, MySQL/SQLite, and hosted generation.
+v0 — Postgres, with two modes: generate-from-scratch and subset + anonymize real
+production data into staging. On the roadmap: MySQL/SQLite and hosted generation.
 
 ## License
 
