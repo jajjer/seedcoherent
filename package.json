@@ -30,11 +30,13 @@
   "dependencies": {
     "@faker-js/faker": "^9.3.0",
     "commander": "^12.1.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "pg-copy-streams": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@types/pg-copy-streams": "^1.2.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },

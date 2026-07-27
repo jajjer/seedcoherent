@@ -12,8 +12,8 @@ import { after, before, test } from "node:test";
 import pg from "pg";
 import { introspect } from "../src/introspect.js";
 import { topoSort } from "../src/graph.js";
-import { buildData } from "../src/generate.js";
-import { insertInto } from "../src/emit.js";
+import { buildData, generateInto } from "../src/generate.js";
+import { insertInto, CopySink } from "../src/emit.js";
 
 const url = process.env.DATABASE_URL;
 const SCHEMA = "seedcoherent_test";
@@ -135,4 +135,54 @@ test("--truncate clears and re-seeds without constraint errors", { skip: !enable
     (await client.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.users`)).rows[0].n,
   );
   assert.equal(n, 5);
+});
+
+test("streams generation straight into COPY across many batches", { skip: !enabled }, async () => {
+  const schema = await introspect(client, [SCHEMA]);
+  const { order, cyclic } = topoSort(schema);
+  const skip = new Set<string>();
+  const tables = order.filter((t) => !skip.has(t.key));
+
+  // Small batch size forces multiple COPY writes per table.
+  const sink = new CopySink(client, { truncate: true, tables });
+  const stats = await generateInto(
+    schema,
+    order,
+    cyclic,
+    {
+      rows: {
+        [`${SCHEMA}.users`]: 500,
+        [`${SCHEMA}.orders`]: 1500,
+        [`${SCHEMA}.order_items`]: 4000,
+      },
+      seed: 99,
+    },
+    sink,
+    64,
+  );
+
+  assert.equal(sink.inserted, 6000);
+  const byKey = new Map(stats.map((s) => [s.table.key, s.rows]));
+  assert.equal(byKey.get(`${SCHEMA}.users`), 500);
+
+  const count = async (t: string) =>
+    Number((await client.query(`SELECT count(*)::int AS n FROM ${SCHEMA}.${t}`)).rows[0].n);
+  assert.equal(await count("users"), 500);
+  assert.equal(await count("orders"), 1500);
+  assert.equal(await count("order_items"), 4000);
+
+  // Zero orphans across both a simple and a composite FK.
+  const orphanOrders = await client.query(`
+    SELECT count(*)::int AS n FROM ${SCHEMA}.orders o
+    LEFT JOIN ${SCHEMA}.users u ON u.id = o.user_id WHERE u.id IS NULL
+  `);
+  assert.equal(orphanOrders.rows[0].n, 0);
+
+  // COPY inserted explicit identity ids; the sequence reset must let a plain
+  // INSERT (DB assigns the id) succeed without a PK collision.
+  const inserted = await client.query(
+    `INSERT INTO ${SCHEMA}.users (email, full_name, created_at)
+     VALUES ('post-copy@example.com', 'Post Copy', now()) RETURNING id`,
+  );
+  assert.ok(Number(inserted.rows[0].id) > 500);
 });

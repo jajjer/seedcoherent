@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sqlLiteral, toSql } from "../src/emit.js";
+import { sqlLiteral, copyValue, toSql } from "../src/emit.js";
 import type { TableData } from "../src/generate.js";
 import { col, idCol, table } from "./helpers.js";
 
@@ -51,6 +51,52 @@ test("single quotes in strings are doubled", () => {
 
 test("single quotes inside json are doubled", () => {
   assert.equal(sqlLiteral({ name: "O'Brien" }, jsonCol), `'{"name":"O''Brien"}'::jsonb`);
+});
+
+// ---- copyValue (COPY text format) ----
+
+test("copy null/undefined become the \\N marker", () => {
+  assert.equal(copyValue(null, textCol), "\\N");
+  assert.equal(copyValue(undefined, textCol), "\\N");
+});
+
+test("copy booleans become t/f", () => {
+  assert.equal(copyValue(true, textCol), "t");
+  assert.equal(copyValue(false, textCol), "f");
+});
+
+test("copy numbers are emitted bare", () => {
+  assert.equal(copyValue(42, textCol), "42");
+  assert.equal(copyValue(3.14, textCol), "3.14");
+});
+
+test("copy dates become ISO strings", () => {
+  const d = new Date("2025-01-02T03:04:05.000Z");
+  assert.equal(copyValue(d, textCol), "2025-01-02T03:04:05.000Z");
+});
+
+test("copy buffers become bytea hex with a doubled backslash", () => {
+  // Field text is \\x4142 so Postgres un-escapes it to \x4142 (bytea hex).
+  assert.equal(copyValue(Buffer.from("AB"), col("b", { udtName: "bytea" })), "\\\\x4142");
+});
+
+test("copy escapes tab, newline, carriage return, and backslash", () => {
+  assert.equal(copyValue("a\tb\nc\rd\\e", textCol), "a\\tb\\nc\\rd\\\\e");
+});
+
+test("copy arrays become escaped Postgres array literals", () => {
+  assert.equal(copyValue(["a", "b"], col("t", { udtName: "_text" })), `{"a","b"}`);
+});
+
+test("copy array elements with quotes/backslashes get doubled backslashes", () => {
+  // Array literal is {"a\"b"}; the backslash is data, so COPY doubles it.
+  assert.equal(copyValue(['a"b'], col("t", { udtName: "_text" })), `{"a\\\\"b"}`);
+});
+
+test("copy objects/json are JSON-encoded with embedded controls escaped", () => {
+  // JSON.stringify turns the newline/tab into \n and \t; copyEscape then doubles
+  // those backslashes so the COPY parser hands Postgres the original \n / \t.
+  assert.equal(copyValue({ note: "line1\nline2\t!" }, jsonCol), `{"note":"line1\\\\nline2\\\\t!"}`);
 });
 
 // ---- toSql script assembly ----

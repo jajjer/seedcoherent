@@ -5,12 +5,12 @@ import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import pg from "pg";
 import { loadConfig, parseRowSpecs } from "./config.js";
-import { toSql, insertInto } from "./emit.js";
-import { buildData } from "./generate.js";
+import { toSql, insertData, CopySink } from "./emit.js";
+import { buildData, generateInto, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
 import { introspect } from "./introspect.js";
 import { anonymizeAll, collectSubset, PgRowFetcher } from "./subset.js";
-import type { Config } from "./types.js";
+import type { Config, TableInfo } from "./types.js";
 
 const program = new Command();
 
@@ -21,6 +21,7 @@ program
   .option("-r, --rows <spec...>", "rows per table, e.g. users=1000 orders=5000", [])
   .option("-d, --default-rows <n>", "default rows for tables not listed", (v) => parseInt(v, 10))
   .option("-s, --seed <n>", "RNG seed for deterministic output", (v) => parseInt(v, 10))
+  .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) => parseInt(v, 10))
   .option("--schema <name...>", "schema(s) to read", ["public"])
   .option("--skip <table...>", "tables to leave empty", [])
   .option("-c, --config <path>", "path to a config file")
@@ -51,6 +52,7 @@ program
       rows: { ...fileConfig.rows, ...parseRowSpecs(opts.rows) },
       defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
       seed: opts.seed ?? fileConfig.seed,
+      batchSize: opts.batchSize ?? fileConfig.batchSize,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
@@ -66,18 +68,24 @@ program
       const { order, cyclic } = topoSort(schema);
 
       const isSubset = opts.subset.length > 0;
-      const data = isSubset
-        ? anonymizeAll(schema, order, await collectSubset(schema, parseRowSpecs(opts.subset), new PgRowFetcher(client)), config)
-        : buildData(schema, order, cyclic, config);
-
-      const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
+      const batchSize: number | undefined = config.batchSize;
       const verb = isSubset ? "Subset" : "Generated";
+      const subsetData = async () =>
+        anonymizeAll(
+          schema,
+          order,
+          await collectSubset(schema, parseRowSpecs(opts.subset), new PgRowFetcher(client)),
+          config,
+        );
 
       if (opts.out || opts.print) {
+        // SQL emit needs the full dataset in memory to assemble the script.
+        const data = isSubset ? await subsetData() : buildData(schema, order, cyclic, config);
+        const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
         const sql = toSql(data);
         if (opts.out) {
           await writeFile(opts.out, sql, "utf8");
-          console.error(summary(data, cyclic, verb));
+          console.error(summary(counts(data), cyclic, verb));
           console.error(`\n✓ Wrote ${totalRows} rows across ${data.length} tables to ${opts.out}`);
         } else {
           process.stdout.write(sql + "\n");
@@ -87,35 +95,52 @@ program
         if (!opts.to) {
           program.error("--subset needs a destination: pass --to <connection>, --out <file>, or --print.");
         }
+        const data = await subsetData();
         const target = new pg.Client({ connectionString: opts.to });
         await target.connect();
         try {
-          const inserted = await insertInto(target, data, opts.truncate);
-          console.error(summary(data, cyclic, verb));
+          const inserted = await insertData(target, data, { truncate: opts.truncate, batchSize });
+          console.error(summary(counts(data), cyclic, verb));
           console.error(`\n✓ Inserted ${inserted} rows across ${data.length} tables into --to target`);
         } finally {
           await target.end();
         }
       } else {
-        const inserted = await insertInto(client, data, opts.truncate);
-        console.error(summary(data, cyclic, verb));
-        console.error(`\n✓ Inserted ${inserted} rows across ${data.length} tables`);
+        // From-scratch direct insert: stream generation straight into COPY so
+        // we never hold the whole dataset in memory.
+        const skip = new Set(config.skip ?? []);
+        const tables = order.filter((t) => !skip.has(t.name) && !skip.has(t.key));
+        const sink = new CopySink(client, { truncate: opts.truncate, tables });
+        const stats = await generateInto(schema, order, cyclic, config, sink, batchSize);
+        const filled = stats.filter((s) => s.rows > 0);
+        console.error(summary(counts(stats), cyclic, verb));
+        console.error(`\n✓ Inserted ${sink.inserted} rows across ${filled.length} tables`);
       }
     } finally {
       await client.end();
     }
   });
 
+/** Normalize either materialized TableData or streaming stats into name/count pairs. */
+function counts(
+  entries: ({ table: TableInfo; rows: unknown[] } | TableStats)[],
+): { key: string; count: number }[] {
+  return entries.map((e) => ({
+    key: e.table.key,
+    count: typeof e.rows === "number" ? e.rows : e.rows.length,
+  }));
+}
+
 function summary(
-  data: { table: { key: string }; rows: unknown[] }[],
+  entries: { key: string; count: number }[],
   cyclic: Set<string>,
   verb = "Generated",
 ): string {
-  const lines = data
-    .filter((d) => d.rows.length > 0)
-    .map((d) => {
-      const mark = cyclic.has(d.table.key) ? " (cyclic)" : "";
-      return `  ${d.table.key.padEnd(32)} ${String(d.rows.length).padStart(7)}${mark}`;
+  const lines = entries
+    .filter((e) => e.count > 0)
+    .map((e) => {
+      const mark = cyclic.has(e.key) ? " (cyclic)" : "";
+      return `  ${e.key.padEnd(32)} ${String(e.count).padStart(7)}${mark}`;
     });
   return [`${verb}:`, ...lines].join("\n");
 }

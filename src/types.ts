@@ -93,6 +93,8 @@ export interface Config {
   skip?: string[];
   /** RNG seed for deterministic output. */
   seed?: number;
+  /** Rows per COPY batch / streaming-generation chunk. Does not affect output. */
+  batchSize?: number;
   /**
    * Subset+anonymize only: columns to scrub even though they are join keys
    * (primary keys, FK columns, or columns an FK references). Naming any one
