@@ -33,6 +33,12 @@ program
     [],
   )
   .option("--to <connection>", "target DB to insert the anonymized subset into")
+  .option(
+    "--anonymize <col...>",
+    "subset: also scrub these join keys, e.g. accounts.email (remaps the whole join)",
+    [],
+  )
+  .option("--preserve <col...>", "subset: keep these columns' real values, e.g. users.country", [])
   .action(async (connection, opts) => {
     const connStr = connection ?? process.env.DATABASE_URL;
     if (!connStr) {
@@ -46,6 +52,8 @@ program
       defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
       seed: opts.seed ?? fileConfig.seed,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
+      anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
+      preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
     };
 
     const client = new pg.Client({ connectionString: connStr });

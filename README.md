@@ -61,6 +61,8 @@ Connection string comes from the first argument or `DATABASE_URL`.
 | `--truncate` | `TRUNCATE ... RESTART IDENTITY CASCADE` before inserting |
 | `--subset <table=n...>` | Subset + anonymize real data (see below) |
 | `--to <connection>` | Target DB to insert the anonymized subset into |
+| `--anonymize <col...>` | Also scrub these join keys (see below) |
+| `--preserve <col...>` | Keep these columns' real values (see below) |
 
 ## Subset + anonymize real data
 
@@ -89,11 +91,36 @@ How it works:
    column, so internal duplicates stay consistent and `UNIQUE` columns stay
    unique. `NULL`s are preserved.
 
-To keep the join graph intact, **key columns are passed through verbatim** —
-primary keys, foreign-key columns, and any column referenced by a foreign key.
-(So a natural key that is itself PII, e.g. an email used as a primary key, is
-*not* anonymized; use surrogate keys if that matters.) Anonymized data is never
-written back to the source — a subset run requires `--to`, `--out`, or `--print`.
+To keep the join graph intact, **key columns are passed through verbatim** by
+default — primary keys, foreign-key columns, and any column referenced by a
+foreign key. Anonymized data is never written back to the source — a subset run
+requires `--to`, `--out`, or `--print`.
+
+### Per-column control
+
+The defaults are conservative — non-keys scrubbed, keys kept — but you can
+override either side per column:
+
+```bash
+# A natural key that is itself PII (e.g. an email used as a primary key) is
+# preserved by default. --anonymize opts it into scrubbing, and every foreign
+# key that references it is remapped to match, so joins still resolve.
+npx seedcoherent $PROD_URL --subset sessions=500 --to $STAGING_URL \
+  --anonymize accounts.email
+
+# Keep a non-key column's real values (e.g. so staging keeps a realistic
+# country/plan distribution).
+npx seedcoherent $PROD_URL --subset orders=500 --to $STAGING_URL \
+  --preserve users.country users.plan
+```
+
+`--anonymize` works on a whole **join group**: because both sides of a foreign
+key hold the same value, naming *either* the referenced key or a referencing FK
+column scrubs the entire group consistently. The same original always maps to
+the same fake across every table, so referential integrity is preserved.
+Columns are matched as `table.column`, `schema.table.column`, or a bare
+`column`. Both flags also read from `anonymize` / `preserve` arrays in the
+[config file](#config-file).
 
 ## Config file
 
@@ -110,13 +137,18 @@ generators or set counts. CLI flags win over the file.
     "users.email": "internet.email",
     "orders.status": { "values": ["paid", "shipped"] },
     "products.price": { "faker": "commerce.price" }
-  }
+  },
+  "anonymize": ["accounts.email"],
+  "preserve": ["users.country"]
 }
 ```
 
 Column overrides accept a faker path (`"internet.email"`), `{ "faker": "..." }`,
 a fixed `{ "value": ... }`, or `{ "values": [...] }` to pick from a list. Keys are
 `table.column` or a bare `column` to apply everywhere.
+
+`anonymize` and `preserve` are subset-mode lists of columns to scrub or keep,
+matching the `--anonymize` / `--preserve` flags (which append to them).
 
 ## Try it locally
 

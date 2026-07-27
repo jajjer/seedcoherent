@@ -93,4 +93,17 @@ export interface Config {
   skip?: string[];
   /** RNG seed for deterministic output. */
   seed?: number;
+  /**
+   * Subset+anonymize only: columns to scrub even though they are join keys
+   * (primary keys, FK columns, or columns an FK references). Naming any one
+   * column of a join group anonymizes the whole group consistently, so FKs
+   * still resolve. Keyed by "table.column", "schema.table.column", or bare
+   * "column".
+   */
+  anonymize?: string[];
+  /**
+   * Subset+anonymize only: columns to pass through verbatim even though they
+   * would normally be scrubbed. Same key forms as `anonymize`.
+   */
+  preserve?: string[];
 }
