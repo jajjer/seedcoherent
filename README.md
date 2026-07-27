@@ -53,6 +53,7 @@ Connection string comes from the first argument or `DATABASE_URL`.
 | `-r, --rows <table=n...>` | Rows per table, e.g. `users=1000 orders=5000` |
 | `-d, --default-rows <n>` | Rows for tables not listed (default: 10) |
 | `-s, --seed <n>` | RNG seed for reproducible output |
+| `--batch-size <n>` | Rows per `COPY` batch (default: 10000; does not change output) |
 | `--schema <name...>` | Schema(s) to read (default: `public`) |
 | `--skip <table...>` | Tables to leave empty |
 | `-c, --config <path>` | Config file (see below) |
@@ -168,7 +169,10 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 3. **Infer** — picks a value generator per column from its name and type.
 4. **Generate** — builds rows, drawing FK values from already-generated parents
    and de-duplicating uniques.
-5. **Emit** — inserts in dependency order in one transaction, or writes SQL.
+5. **Emit** — streams rows in dependency order into Postgres with `COPY ... FROM
+   STDIN`, batched (`--batch-size`) so generation never holds the whole dataset
+   in memory, all inside one transaction. `--out`/`--print` write an `INSERT`
+   script instead.
 
 ## Tests
 

@@ -7,6 +7,9 @@ import type { Config } from "./types.js";
 
 const DEFAULT_NAMES = ["seed.config.json", "seed.config.js", "seed.config.mjs"];
 
+/** Rows per COPY batch / streaming-generation chunk. */
+export const DEFAULT_BATCH_SIZE = 10000;
+
 export async function loadConfig(explicitPath?: string): Promise<Config> {
   const candidates = explicitPath ? [explicitPath] : DEFAULT_NAMES;
   for (const name of candidates) {
