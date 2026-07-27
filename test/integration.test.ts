@@ -13,7 +13,7 @@ import pg from "pg";
 import { introspect } from "../src/introspect.js";
 import { topoSort } from "../src/graph.js";
 import { buildData, generateInto } from "../src/generate.js";
-import { insertInto, CopySink } from "../src/emit.js";
+import { insertInto, toSql, CopySink } from "../src/emit.js";
 
 const url = process.env.DATABASE_URL;
 const SCHEMA = "seedcoherent_test";
@@ -54,6 +54,7 @@ before(async () => {
 after(async () => {
   if (!enabled || !client) return;
   await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+  await client.query(`DROP SCHEMA IF EXISTS ${HARD} CASCADE`);
   await client.end();
 });
 
@@ -116,6 +117,90 @@ test("inserts referentially-correct data into a live database", { skip: !enabled
     `SELECT count(*)::int AS n FROM ${SCHEMA}.order_items WHERE NOT (quantity BETWEEN 1 AND 100)`,
   );
   assert.equal(badQty.rows[0].n, 0);
+});
+
+// A schema exercising features a plain fixture doesn't: partitioned tables,
+// composite/range/domain types, and enum arrays. Each of these rejected the
+// generator's output before it was made type-aware.
+const HARD = "seedcoherent_hard";
+
+const HARD_DDL = `
+  DROP SCHEMA IF EXISTS ${HARD} CASCADE;
+  CREATE SCHEMA ${HARD};
+  CREATE TYPE ${HARD}.mood AS ENUM ('happy', 'sad', 'meh');
+  CREATE DOMAIN ${HARD}.us_zip AS text CHECK (VALUE ~ '^[0-9]{5}$');
+  CREATE TYPE ${HARD}.addr AS (line1 text, city text, zip text);
+  CREATE TABLE ${HARD}.accounts (
+    id     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    ext_no bigint GENERATED ALWAYS AS IDENTITY,
+    email  text UNIQUE NOT NULL,
+    tags   text[] NOT NULL DEFAULT '{}',
+    moods  ${HARD}.mood[],
+    home   ${HARD}.addr,
+    zip    ${HARD}.us_zip,
+    win    tstzrange
+  );
+  CREATE TABLE ${HARD}.events (
+    id         bigint GENERATED ALWAYS AS IDENTITY,
+    account_id bigint NOT NULL REFERENCES ${HARD}.accounts(id),
+    kind       text NOT NULL,
+    at         timestamptz NOT NULL,
+    PRIMARY KEY (id, at)
+  ) PARTITION BY RANGE (at);
+  CREATE TABLE ${HARD}.events_2024 PARTITION OF ${HARD}.events FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+  CREATE TABLE ${HARD}.events_2025 PARTITION OF ${HARD}.events FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+`;
+
+const HARD_ROWS = { [`${HARD}.accounts`]: 15, [`${HARD}.events`]: 40 };
+
+/** Assert the DB now holds valid, well-routed data for the hard schema. */
+async function assertHardData() {
+  const count = async (q: string) => Number((await client.query(q)).rows[0].n);
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts`), 15);
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.events`), 40);
+
+  // Partitioned rows all routed into a real partition (parent = sum of children).
+  const routed =
+    (await count(`SELECT count(*)::int n FROM ${HARD}.events_2024`)) +
+    (await count(`SELECT count(*)::int n FROM ${HARD}.events_2025`));
+  assert.equal(routed, 40);
+
+  // The domain's regex CHECK held for every generated zip.
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts WHERE zip IS NOT NULL AND zip !~ '^[0-9]{5}$'`), 0);
+
+  // Enum-array elements are valid labels (the insert would have failed otherwise).
+  assert.equal(
+    await count(`SELECT count(*)::int n FROM ${HARD}.accounts a, unnest(a.moods) m WHERE m::text NOT IN ('happy','sad','meh')`),
+    0,
+  );
+  // No orphan events across the FK into a partitioned-parent's parent table.
+  assert.equal(
+    await count(`SELECT count(*)::int n FROM ${HARD}.events e LEFT JOIN ${HARD}.accounts a ON a.id = e.account_id WHERE a.id IS NULL`),
+    0,
+  );
+}
+
+test("COPY-loads partitioned, composite, range, domain, and enum-array data", { skip: !enabled }, async () => {
+  await client.query(HARD_DDL);
+  const schema = await introspect(client, [HARD]);
+  // Leaf partitions are hidden; the parent is the insert target.
+  assert.ok(schema.tables.has(`${HARD}.events`));
+  assert.ok(!schema.tables.has(`${HARD}.events_2024`));
+
+  const { order, cyclic } = topoSort(schema);
+  const data = buildData(schema, order, cyclic, { rows: HARD_ROWS, seed: 42 });
+  await insertInto(client, data, true);
+  await assertHardData();
+});
+
+test("INSERT-script path loads the same hard schema", { skip: !enabled }, async () => {
+  await client.query(HARD_DDL);
+  const schema = await introspect(client, [HARD]);
+  const { order, cyclic } = topoSort(schema);
+  const data = buildData(schema, order, cyclic, { rows: HARD_ROWS, seed: 42 });
+  // Exercise the text/INSERT emitter (distinct from COPY): run its script live.
+  await client.query(toSql(data));
+  await assertHardData();
 });
 
 test("--truncate clears and re-seeds without constraint errors", { skip: !enabled }, async () => {

@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Faker, en } from "@faker-js/faker";
-import { inferGenerator } from "../src/infer.js";
+import { inferGenerator, partitionKeyGenerator } from "../src/infer.js";
+import type { ColumnCheck, PartitionInfo } from "../src/types.js";
 import { col, table } from "./helpers.js";
 
 /** A fresh, seeded Faker so any randomness in assertions is stable. */
@@ -17,6 +18,12 @@ function faker(): Faker {
 function gen(c: ReturnType<typeof col>, overrides = {}): unknown {
   const t = table("t", { columns: [c] });
   return inferGenerator(t, c, overrides)(faker());
+}
+
+/** Infer + invoke a generator honoring a distilled CHECK. */
+function genChecked(c: ReturnType<typeof col>, check: ColumnCheck): unknown {
+  const t = table("t", { columns: [c] });
+  return inferGenerator(t, c, {}, check)(faker());
 }
 
 test("email column produces an email address", () => {
@@ -82,6 +89,101 @@ test("varchar(n) length limit truncates generic text output", () => {
 test("array column yields an array", () => {
   const v = gen(col("tags", { udtName: "_text" }));
   assert.ok(Array.isArray(v));
+});
+
+test("enum array draws every element from the enum labels", () => {
+  const labels = ["happy", "sad", "meh"];
+  const c = col("moods", {
+    udtName: "_mood",
+    dataType: "array",
+    elementType: { udtName: "mood", dataType: "enum", enumValues: labels },
+  });
+  for (let i = 0; i < 20; i++) {
+    const v = gen(c) as string[];
+    assert.ok(Array.isArray(v));
+    for (const el of v) assert.ok(labels.includes(el), `unexpected enum element ${el}`);
+  }
+});
+
+test("composite column yields a parenthesized record literal", () => {
+  const c = col("home", {
+    udtName: "addr",
+    dataType: "composite",
+    compositeFields: [
+      { name: "line1", udtName: "text", dataType: "text", enumValues: null },
+      { name: "num", udtName: "int4", dataType: "integer", enumValues: null },
+    ],
+  });
+  const v = gen(c) as string;
+  assert.equal(typeof v, "string");
+  assert.match(v, /^\(.*\)$/);
+  // Two comma-separated top-level fields.
+  assert.match(v, /^\("[^"]*",\d+\)$/);
+});
+
+test("range column yields a [lower,upper) literal with lower < upper", () => {
+  const c = col("span", {
+    udtName: "int4range",
+    dataType: "range",
+    rangeSubtype: { udtName: "int4", dataType: "integer", enumValues: null },
+  });
+  const v = gen(c) as string;
+  const m = v.match(/^\[(\d+),(\d+)\)$/);
+  assert.ok(m, `unexpected range literal ${v}`);
+  assert.ok(Number(m![1]) < Number(m![2]));
+});
+
+test("a regex CHECK generates a matching string (zip domain)", () => {
+  const c = col("zip", { udtName: "text" });
+  for (let i = 0; i < 20; i++) {
+    const t = table("t", { columns: [c] });
+    const v = inferGenerator(t, c, {}, { pattern: "^[0-9]{5}$" })(faker()) as string;
+    assert.match(v, /^[0-9]{5}$/, `"${v}" does not match the pattern`);
+  }
+});
+
+test("an unsupported regex CHECK falls back without throwing", () => {
+  // Back-references aren't supported by the sampler; it must not crash.
+  const c = col("weird", { udtName: "text" });
+  const v = genChecked(c, { pattern: "^(a)\\1$" });
+  assert.equal(typeof v, "string");
+});
+
+test("RANGE partition key stays inside a covered interval", () => {
+  const c = col("at", { udtName: "timestamptz", dataType: "timestamp" });
+  const part: PartitionInfo = {
+    strategy: "range",
+    keyColumns: ["at"],
+    hasDefault: false,
+    ranges: [{ from: "2024-01-01", to: "2025-01-01" }],
+  };
+  const g = partitionKeyGenerator(c, part)!;
+  assert.ok(g, "expected a partition-key generator");
+  for (let i = 0; i < 20; i++) {
+    const d = g(faker()) as Date;
+    assert.ok(d instanceof Date);
+    assert.ok(d >= new Date("2024-01-01") && d < new Date("2025-01-01"), `${d.toISOString()} out of range`);
+  }
+});
+
+test("LIST partition key draws only from accepted values", () => {
+  const c = col("status", { udtName: "text" });
+  const part: PartitionInfo = {
+    strategy: "list",
+    keyColumns: ["status"],
+    hasDefault: false,
+    list: ["open", "closed", "pending"],
+  };
+  const g = partitionKeyGenerator(c, part)!;
+  for (let i = 0; i < 20; i++) {
+    assert.ok(["open", "closed", "pending"].includes(g(faker()) as string));
+  }
+});
+
+test("partition key generator is skipped when a DEFAULT partition exists", () => {
+  const c = col("at", { udtName: "timestamptz", dataType: "timestamp" });
+  const part: PartitionInfo = { strategy: "range", keyColumns: ["at"], hasDefault: true, ranges: [] };
+  assert.equal(partitionKeyGenerator(c, part), null);
 });
 
 test("string override resolves a faker path", () => {

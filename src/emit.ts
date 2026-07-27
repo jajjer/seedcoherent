@@ -18,11 +18,13 @@ function qualified(t: TableInfo): string {
   return `${IDENT(t.schema)}.${IDENT(t.name)}`;
 }
 
-/** Does the table use an identity PK we assign explicit values for? */
-function overridesIdentity(t: TableInfo): boolean {
-  if (t.primaryKey.length !== 1) return false;
-  const col = t.columns.find((c) => c.name === t.primaryKey[0]);
-  return !!col && col.isIdentity && col.dataType === "integer";
+/**
+ * Do we insert an explicit value into an identity column? If so the INSERT needs
+ * OVERRIDING SYSTEM VALUE (required for GENERATED ALWAYS, harmless otherwise).
+ * This covers composite-PK and non-PK identity columns, not just single-int PKs.
+ */
+function overridesIdentity(columns: ColumnInfo[]): boolean {
+  return columns.some((c) => c.isIdentity);
 }
 
 /** Format a JS value as a Postgres SQL literal. */
@@ -49,7 +51,7 @@ export function toSql(data: TableData[]): string {
   for (const { table, rows, columns } of data) {
     if (rows.length === 0) continue;
     const colList = columns.map((c) => IDENT(c.name)).join(", ");
-    const override = overridesIdentity(table) ? " OVERRIDING SYSTEM VALUE" : "";
+    const override = overridesIdentity(columns) ? " OVERRIDING SYSTEM VALUE" : "";
     parts.push(`-- ${table.key}: ${rows.length} rows`);
     parts.push(`INSERT INTO ${qualified(table)} (${colList})${override} VALUES`);
     const values = rows.map((row) => {

@@ -5,7 +5,7 @@
  */
 
 import { Faker, en } from "@faker-js/faker";
-import { inferGenerator, type Generator } from "./infer.js";
+import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.js";
 import { parseChecks } from "./checks.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
 import type { Config, ColumnInfo, Schema, TableInfo } from "./types.js";
@@ -104,7 +104,10 @@ export function* streamData(
     const gens = new Map<string, Generator>();
     for (const col of emitCols) {
       if (!fkForColumn(table, col.name)) {
-        gens.set(col.name, inferGenerator(table, col, config.columns, checks.get(col.name)));
+        // A partition-key column must stay inside an existing partition, else the
+        // parent-table insert has nowhere to route the row.
+        const partGen = table.partition ? partitionKeyGenerator(col, table.partition) : null;
+        gens.set(col.name, partGen ?? inferGenerator(table, col, config.columns, checks.get(col.name)));
       }
     }
 
@@ -287,8 +290,14 @@ function valueForColumn(
     return faker.helpers.arrayElement(parents)[refCol];
   }
 
-  // 3. Optional null for plain nullable columns.
-  if (col.nullable && !isInAnyUnique(table, col.name) && faker.datatype.boolean({ probability: NULL_PROBABILITY })) {
+  // 3. Optional null for plain nullable columns (never the partition key — a
+  //    null there may not route to any partition).
+  if (
+    col.nullable &&
+    !isInAnyUnique(table, col.name) &&
+    !table.partition?.keyColumns.includes(col.name) &&
+    faker.datatype.boolean({ probability: NULL_PROBABILITY })
+  ) {
     return null;
   }
 

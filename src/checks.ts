@@ -57,7 +57,16 @@ const COMPARATORS = [">=", "<=", "<>", "!=", ">", "<", "="] as const;
 
 function parseClause(clause: string): [string, Partial<ColumnCheck>] | null {
   const inner = stripWrap(clause);
-  return parseMembership(inner) ?? parseLength(inner) ?? parseComparison(inner);
+  return parseMembership(inner) ?? parseLength(inner) ?? parseRegex(inner) ?? parseComparison(inner);
+}
+
+/** `<col> ~ '<pattern>'` — a POSIX-regex restriction (common in domain CHECKs). */
+function parseRegex(clause: string): [string, Partial<ColumnCheck>] | null {
+  const m = clause.match(/^(.*?)\s*~\*?\s*'((?:[^']|'')*)'\s*$/s);
+  if (!m) return null;
+  const column = asColumn(m[1]);
+  if (!column) return null;
+  return [column, { pattern: m[2].replace(/''/g, "'") }];
 }
 
 /** `<expr> = ANY (ARRAY[lit, lit, ...])` — an IN-list restriction. */
@@ -192,6 +201,7 @@ function mergeCheck(a: ColumnCheck, b: Partial<ColumnCheck>): ColumnCheck {
   }
   if (b.minLength !== undefined) out.minLength = Math.max(out.minLength ?? 0, b.minLength);
   if (b.maxLength !== undefined) out.maxLength = Math.min(out.maxLength ?? Infinity, b.maxLength);
+  if (b.pattern !== undefined) out.pattern = b.pattern; // last pattern wins (rare to have two)
   return out;
 }
 
