@@ -7,8 +7,9 @@
 import { Faker, en } from "@faker-js/faker";
 import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.js";
 import { parseChecks } from "./checks.js";
+import { resolveDistribution, type Sampler } from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
-import type { Config, ColumnInfo, Schema, TableInfo } from "./types.js";
+import type { Config, ColumnInfo, ForeignKey, Schema, TableInfo } from "./types.js";
 
 export type Row = Record<string, unknown>;
 
@@ -110,6 +111,18 @@ export function* streamData(
         gens.set(col.name, partGen ?? inferGenerator(table, col, config.columns, checks.get(col.name)));
       }
     }
+    // Bind a parent-selection sampler per cross-table FK. Topological order means
+    // every parent pool is already fully generated, so each sampler can be fixed
+    // to its pool now (precomputing any weight tables once). Self-refs stay on the
+    // per-row path in valueForColumn — they draw from the batch built so far.
+    const fkSamplers = new Map<ForeignKey, Sampler<Row>>();
+    for (const fk of table.foreignKeys) {
+      if (fk.refTable === table.key) continue;
+      const parents = generated.get(fk.refTable) ?? [];
+      if (parents.length === 0) continue; // no parents → columns fall back to null/undefined
+      const dist = resolveDistribution(table, fk.columns, config.distributions);
+      fkSamplers.set(fk, dist.bind(parents));
+    }
 
     const count = rowCount(table, config);
     // Full row history for this table, needed for self-referential FK draws and
@@ -126,16 +139,21 @@ export function* streamData(
 
       for (let attempt = 0; attempt < UNIQUE_RETRIES; attempt++) {
         const candidate: Row = {};
+        // Per-row cache of the parent chosen for each cross-table FK. The parent
+        // is drawn lazily when the FK's first column is reached (keeping the RNG
+        // sequence identical to selecting inline) and reused for the FK's other
+        // columns, so a composite FK copies one coherent parent tuple.
+        const fkParents = new Map<ForeignKey, Row | null>();
         for (const col of emitCols) {
           candidate[col.name] = valueForColumn(
             table,
             col,
             gens,
             faker,
-            generated,
+            fkSamplers,
+            fkParents,
             rows,
             i,
-            cyclic,
             () => idCounter,
           );
         }
@@ -255,10 +273,10 @@ function valueForColumn(
   col: ColumnInfo,
   gens: Map<string, Generator>,
   faker: Faker,
-  generated: Map<string, Row[]>,
+  fkSamplers: Map<ForeignKey, Sampler<Row>>,
+  fkParents: Map<ForeignKey, Row | null>,
   currentRows: Row[],
   rowIndex: number,
-  cyclic: Set<string>,
   nextId: () => number,
 ): unknown {
   // 1. Synthetic PK id.
@@ -285,9 +303,16 @@ function valueForColumn(
       return parent[refCol];
     }
 
-    const parents = generated.get(fk.refTable) ?? [];
-    if (parents.length === 0) return col.nullable ? null : undefined;
-    return faker.helpers.arrayElement(parents)[refCol];
+    // Cross-table FK: pick this FK's parent once per row (at its first column),
+    // then reuse it so every column of a composite FK copies the same tuple.
+    let parent = fkParents.get(fk);
+    if (parent === undefined && !fkParents.has(fk)) {
+      const sample = fkSamplers.get(fk);
+      parent = sample ? sample(faker) : null; // no sampler ⇒ empty parent pool
+      fkParents.set(fk, parent);
+    }
+    if (!parent) return col.nullable ? null : undefined;
+    return parent[refCol];
   }
 
   // 3. Optional null for plain nullable columns (never the partition key — a

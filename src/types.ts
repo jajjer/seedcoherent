@@ -133,6 +133,21 @@ export interface Schema {
   tables: Map<string, TableInfo>;
 }
 
+/**
+ * How child rows choose their parent across a foreign key. `uniform` (the
+ * default) picks any parent with equal probability; `zipf` skews the choice so a
+ * few parents collect many children and most collect few — the power-law shape
+ * real relational data usually has. `skew` tunes the concentration: it is the
+ * Zipf exponent, so parent rank `k` gets weight `1/k**skew`. Default 1 (classic
+ * harmonic Zipf); higher values concentrate harder, lower values flatten toward
+ * uniform.
+ */
+export type DistSpec =
+  | "uniform"
+  | "zipf"
+  | { kind: "uniform" }
+  | { kind: "zipf"; skew?: number };
+
 /** Per-column override supplied by the user via config. */
 export type ColumnOverride =
   | string // a faker path like "internet.email" or "person.firstName"
@@ -147,6 +162,13 @@ export interface Config {
   defaultRows?: number;
   /** Per-column generator overrides: { "users.email": "internet.email" }. */
   columns?: Record<string, ColumnOverride>;
+  /**
+   * Per-foreign-key parent-selection distributions, keyed by the child column:
+   * { "orders.user_id": "zipf" }. Controls how many children each parent row
+   * collects. Defaults to `uniform` for any FK not listed. Keyed by
+   * "table.column", "schema.table.column", or bare "column".
+   */
+  distributions?: Record<string, DistSpec>;
   /** Tables to skip entirely. */
   skip?: string[];
   /** RNG seed for deterministic output. */
