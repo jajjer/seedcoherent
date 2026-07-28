@@ -1,21 +1,25 @@
 /**
- * Dialect seam: picks the Postgres or MySQL implementation from a connection
- * string and exposes a uniform surface (connect, introspect, subset fetcher,
- * bulk-insert sink, offline script) so the CLI stays database-agnostic.
+ * Dialect seam: picks the Postgres, MySQL, or SQLite implementation from a
+ * connection string and exposes a uniform surface (connect, introspect, subset
+ * fetcher, bulk-insert sink, offline script) so the CLI stays database-agnostic.
  */
 
 import pg from "pg";
 import mysql from "mysql2/promise";
+import Database from "better-sqlite3";
 import { CopySink, insertData as insertDataPg, toSql } from "./emit.js";
 import type { RowSink, TableData } from "./generate.js";
 import { introspect } from "./introspect.js";
 import { insertDataMysql, MysqlSink, toSqlMysql } from "./mysql-emit.js";
 import { introspectMysql } from "./mysql-introspect.js";
 import { MysqlRowFetcher } from "./mysql-subset.js";
+import { insertDataSqlite, SqliteSink, toSqlSqlite } from "./sqlite-emit.js";
+import { introspectSqlite } from "./sqlite-introspect.js";
+import { SqliteRowFetcher } from "./sqlite-subset.js";
 import { PgRowFetcher, type RowFetcher } from "./subset.js";
 import type { Connection, Schema, TableInfo } from "./types.js";
 
-export type DialectName = "postgres" | "mysql";
+export type DialectName = "postgres" | "mysql" | "sqlite";
 
 export interface SinkOptions {
   truncate?: boolean;
@@ -124,6 +128,75 @@ const mysqlDialect: Dialect = {
   },
 };
 
+/**
+ * Wraps a synchronous better-sqlite3 handle behind the async Connection surface.
+ * SQLite has no schemas in the Postgres sense — a file is one database, exposed
+ * as `main` — so PRAGMAs/reads target the connection's own database.
+ */
+class SqliteConnection implements Connection {
+  constructor(readonly db: Database.Database) {}
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    const stmt = this.db.prepare(sql);
+    const args = (params ?? []) as unknown[];
+    // `reader` is true for statements that return rows (SELECT and most PRAGMAs).
+    if (stmt.reader) return { rows: stmt.all(...args) as T[] };
+    stmt.run(...args);
+    return { rows: [] };
+  }
+  async end(): Promise<void> {
+    this.db.close();
+  }
+}
+
+/**
+ * Resolve a SQLite connection string to a filename better-sqlite3 can open:
+ * strips a `sqlite:`/`file:` scheme (`sqlite::memory:` -> `:memory:`,
+ * `sqlite://./app.db` -> `./app.db`), and passes a bare path through untouched.
+ */
+export function sqliteFile(connStr: string): string {
+  const m = connStr.match(/^(?:sqlite|file):(.*)$/i);
+  if (!m) return connStr;
+  return m[1].replace(/^\/\//, "");
+}
+
+const sqliteDialect: Dialect = {
+  name: "sqlite",
+  async connect(connStr) {
+    return new SqliteConnection(new Database(sqliteFile(connStr)));
+  },
+  defaultSchemas() {
+    return ["main"];
+  },
+  introspect(conn, schemas) {
+    return introspectSqlite(conn, schemas);
+  },
+  createRowFetcher(conn) {
+    return new SqliteRowFetcher(conn);
+  },
+  createSink(conn, opts) {
+    return new SqliteSink(conn, { truncate: opts.truncate, tables: opts.tables }, opts.batchSize);
+  },
+  insertData(conn, data, opts) {
+    return insertDataSqlite(conn, data, { truncate: opts.truncate, batchSize: opts.batchSize });
+  },
+  toScript(data) {
+    return toSqlSqlite(data);
+  },
+};
+
+/**
+ * Does this connection string point at SQLite? Anything with an explicit
+ * `sqlite:`/`file:` scheme, an in-memory marker, or a path with a SQLite file
+ * extension — but never a `scheme://host` URL, which stays Postgres/MySQL.
+ */
+export function isSqlite(connStr: string): boolean {
+  if (/^(sqlite|file):/i.test(connStr)) return true;
+  if (/:\/\//.test(connStr)) return false;
+  return connStr === ":memory:" || /\.(db|sqlite|sqlite3)$/i.test(connStr);
+}
+
 export function dialectFor(connStr: string): Dialect {
-  return /^(mysqlx?|mariadb):\/\//i.test(connStr) ? mysqlDialect : postgresDialect;
+  if (/^(mysqlx?|mariadb):\/\//i.test(connStr)) return mysqlDialect;
+  if (isSqlite(connStr)) return sqliteDialect;
+  return postgresDialect;
 }
