@@ -3,7 +3,7 @@
 
 import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { loadConfig, parseRowSpecs } from "./config.js";
+import { loadConfig, parseDistSpecs, parseRowSpecs } from "./config.js";
 import { dialectFor } from "./dialect.js";
 import { buildData, generateInto, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
@@ -22,6 +22,11 @@ program
   .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) => parseInt(v, 10))
   .option("--schema <name...>", "schema(s)/database(s) to read (default: public / the MySQL database)")
   .option("--skip <table...>", "tables to leave empty", [])
+  .option(
+    "--distribution <spec...>",
+    "FK fan-out per child column, e.g. orders.user_id=zipf or orders.user_id=zipf:2 (default uniform)",
+    [],
+  )
   .option("-c, --config <path>", "path to a config file")
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
@@ -52,6 +57,7 @@ program
       seed: opts.seed ?? fileConfig.seed,
       batchSize: opts.batchSize ?? fileConfig.batchSize,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
+      distributions: { ...fileConfig.distributions, ...parseDistSpecs(opts.distribution) },
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
     };

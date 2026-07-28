@@ -36,6 +36,10 @@ everything and inserts in dependency order inside a single transaction.
   valid values instead of crashing the insert.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
+- **Realistic relationships.** Foreign keys don't have to fan out evenly. Ask for
+  a `zipf` distribution and a few parents collect most of the children while the
+  rest thin into a long tail — the lopsided shape real data has — so "top
+  customers", pagination, and GROUP BY cardinalities behave like production.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
 - **Three databases, one tool.** Postgres, MySQL, and SQLite, selected from the
   connection string — same flags, same behavior. On MySQL, `AUTO_INCREMENT` PKs,
@@ -61,6 +65,10 @@ npx seedcoherent $DATABASE_URL --rows users=100 --print
 
 # Deterministic output
 npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
+
+# Skew a foreign key so a few parents get most of the children (power-law fan-out)
+npx seedcoherent $DATABASE_URL --rows users=1000 orders=20000 \
+  --distribution orders.user_id=zipf
 ```
 
 Connection string comes from the first argument or `DATABASE_URL`. A
@@ -80,6 +88,7 @@ to `main`.
 | `--batch-size <n>` | Rows per `COPY` batch (default: 10000; does not change output) |
 | `--schema <name...>` | Schema(s) to read (default: `public`) |
 | `--skip <table...>` | Tables to leave empty |
+| `--distribution <col=kind...>` | FK fan-out per child column, e.g. `orders.user_id=zipf` or `orders.user_id=zipf:2` (default: `uniform`) |
 | `-c, --config <path>` | Config file (see below) |
 | `-o, --out <file>` | Write SQL to a file instead of inserting |
 | `--print` | Print SQL to stdout |
@@ -163,6 +172,10 @@ generators or set counts. CLI flags win over the file.
     "orders.status": { "values": ["paid", "shipped"] },
     "products.price": { "faker": "commerce.price" }
   },
+  "distributions": {
+    "orders.user_id": "zipf",
+    "order_items.product_id": { "kind": "zipf", "skew": 2 }
+  },
   "anonymize": ["accounts.email"],
   "preserve": ["users.country"]
 }
@@ -171,6 +184,14 @@ generators or set counts. CLI flags win over the file.
 Column overrides accept a faker path (`"internet.email"`), `{ "faker": "..." }`,
 a fixed `{ "value": ... }`, or `{ "values": [...] }` to pick from a list. Keys are
 `table.column` or a bare `column` to apply everywhere.
+
+`distributions` controls how children fan out across parents, keyed by the child
+FK column (same key forms as `columns`, and matching the `--distribution` flag).
+`"uniform"` (the default) spreads children evenly; `"zipf"` skews them into a
+power-law so a few parents dominate. `skew` is the Zipf exponent (default `1`,
+the classic harmonic law); raise it to concentrate harder, lower it toward
+uniform. Referential integrity is unchanged — every child still points at a real
+parent.
 
 `anonymize` and `preserve` are subset-mode lists of columns to scrub or keep,
 matching the `--anonymize` / `--preserve` flags (which append to them).
