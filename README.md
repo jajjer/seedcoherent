@@ -1,6 +1,6 @@
 # seedcoherent
 
-**Point it at your Postgres schema, get coherent, referentially-correct fake data.**
+**Point it at your Postgres or MySQL schema, get coherent, referentially-correct fake data.**
 
 Faker doesn't understand your schema. `seedcoherent` reads your live database,
 walks the foreign-key graph, and generates data that actually fits: FKs point at
@@ -10,7 +10,11 @@ column *names* drive realistic content — `email` gets emails, `price` gets mon
 
 ```bash
 npx seedcoherent postgres://localhost/mydb --rows users=1000 orders=5000
+npx seedcoherent mysql://root@localhost/mydb --rows users=1000 orders=5000
 ```
+
+The database is picked from the connection string's scheme (`postgres://` /
+`postgresql://` vs `mysql://`), so the same commands work against either.
 
 That's it. No config, no schema annotations, no per-column mapping. It introspects
 everything and inserts in dependency order inside a single transaction.
@@ -30,7 +34,11 @@ everything and inserts in dependency order inside a single transaction.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
-- **Zero install.** One `npx` command against any Postgres database.
+- **Two databases, one tool.** Postgres and MySQL, selected from the connection
+  string — same flags, same behavior. On MySQL, `AUTO_INCREMENT` PKs, `ENUM`,
+  `tinyint(1)` booleans, `JSON`, and `CHECK` constraints (8.0.16+) are all
+  understood; rows stream in as batched multi-row `INSERT`s (MySQL has no `COPY`).
+- **Zero install.** One `npx` command against any Postgres or MySQL database.
 
 ## Usage
 
@@ -48,7 +56,10 @@ npx seedcoherent $DATABASE_URL --rows users=100 --print
 npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
 ```
 
-Connection string comes from the first argument or `DATABASE_URL`.
+Connection string comes from the first argument or `DATABASE_URL`. A
+`postgres://`/`postgresql://` URL selects Postgres; a `mysql://` URL selects
+MySQL. On Postgres `--schema` defaults to `public`; on MySQL it defaults to the
+database named in the connection string.
 
 ### Options
 
@@ -167,17 +178,21 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 ## How it works
 
 1. **Introspect** — reads tables, columns, PKs, unique/foreign-key/check
-   constraints, enum types, partition strategy + bounds, and full type
-   resolution (arrays, composites, ranges, domains) from `pg_catalog`.
+   constraints, and enum types from the catalog (`pg_catalog` on Postgres,
+   `information_schema` on MySQL). On Postgres it also resolves partition
+   strategy + bounds and full type detail (arrays, composites, ranges, domains).
 2. **Order** — topologically sorts tables so parents populate before children;
    cycles and self-references are broken and handled with a deferred pass.
-3. **Infer** — picks a value generator per column from its name and type.
+3. **Infer** — picks a value generator per column from its name and type. The
+   introspectors map both dialects' types onto one category set, so inference
+   and generation are database-agnostic.
 4. **Generate** — builds rows, drawing FK values from already-generated parents
    and de-duplicating uniques.
-5. **Emit** — streams rows in dependency order into Postgres with `COPY ... FROM
-   STDIN`, batched (`--batch-size`) so generation never holds the whole dataset
-   in memory, all inside one transaction. `--out`/`--print` write an `INSERT`
-   script instead.
+5. **Emit** — streams rows in dependency order, batched (`--batch-size`) so
+   generation never holds the whole dataset in memory, all inside one
+   transaction: `COPY ... FROM STDIN` on Postgres, batched multi-row `INSERT` on
+   MySQL. `--out`/`--print` write a runnable SQL script for the source dialect
+   instead.
 
 ## Tests
 
@@ -197,14 +212,25 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 
 ## Status
 
-v0 — Postgres, with two modes: generate-from-scratch and subset + anonymize real
-production data into staging. On the roadmap: MySQL/SQLite and hosted generation.
+v0 — Postgres and MySQL, with two modes: generate-from-scratch and subset +
+anonymize real production data into staging. On the roadmap: SQLite and hosted
+generation.
 
-A few schema shapes are best-effort: single-column `RANGE`/`LIST` partition keys
-are constrained to a covered partition, but multi-column, expression, and hash
-keys fall back to unconstrained values (fine when a `DEFAULT` partition or full
-hash coverage exists). Domain/`CHECK` regexes are honored for common anchored
-patterns (character classes, quantifiers, simple alternation); anything more
+MySQL support targets a single database per run (the one in the connection
+string, or those named via `--schema`); a subset `--to` a differently-named
+staging database works because writes are unqualified and land in the target
+connection's database. Postgres's richer type detail — arrays, composites,
+ranges, domains, partitioning — has no MySQL equivalent and stays Postgres-only;
+MySQL `CHECK` constraints are read where the server exposes them (MySQL 8.0.16+ /
+MariaDB 10.2+) and honored for the numeric-range and length shapes the parser
+recognizes.
+
+A few Postgres schema shapes are best-effort: single-column `RANGE`/`LIST`
+partition keys are constrained to a covered partition, but multi-column,
+expression, and hash keys fall back to unconstrained values (fine when a
+`DEFAULT` partition or full hash coverage exists). Domain/`CHECK` regexes are
+honored for common anchored patterns (character classes, quantifiers, simple
+alternation); anything more
 exotic (back-references, look-around) is skipped rather than guessed.
 
 ## License

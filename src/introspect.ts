@@ -1,9 +1,9 @@
 /** Reads a live Postgres schema into our internal representation via pg_catalog. */
 
-import type { Client } from "pg";
 import type {
   ColumnInfo,
   CompositeField,
+  Connection,
   ForeignKey,
   PartitionInfo,
   Schema,
@@ -101,7 +101,7 @@ const DOMAIN_CHECK_SQL = `
  * from pg_enum.
  */
 async function buildTypeResolver(
-  client: Client,
+  client: Connection,
   enumsByOid: Map<string, string[]>,
 ): Promise<(oid: string | number) => ResolvedType> {
   const typeRes = await client.query<PgType & { oid: string }>(TYPE_SQL);
@@ -158,7 +158,7 @@ async function buildTypeResolver(
 }
 
 /** Fetch domain oid -> CHECK expression texts (operands use the `VALUE` keyword). */
-async function loadDomainChecks(client: Client): Promise<Map<string, string[]>> {
+async function loadDomainChecks(client: Connection): Promise<Map<string, string[]>> {
   const res = await client.query(DOMAIN_CHECK_SQL);
   const out = new Map<string, string[]>();
   for (const row of res.rows) {
@@ -258,7 +258,7 @@ const STRATEGY: Record<string, PartitionInfo["strategy"]> = { r: "range", l: "li
 
 /** Read partitioning metadata and attach it to the matching parent tables. */
 async function loadPartitions(
-  client: Client,
+  client: Connection,
   schemas: string[],
   tables: Map<string, TableInfo>,
   attnumMap: Map<string, Map<number, string>>,
@@ -348,7 +348,7 @@ function unquoteLiteral(s: string): string | null {
   return t.length ? t : null;
 }
 
-export async function introspect(client: Client, schemas: string[] = ["public"]): Promise<Schema> {
+export async function introspect(client: Connection, schemas: string[] = ["public"]): Promise<Schema> {
   // Enums first: map type oid -> ordered labels.
   const enumRes = await client.query<{ type_oid: string; label: string }>(ENUM_SQL);
   const enumsByOid = new Map<string, string[]>();
