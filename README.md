@@ -2,6 +2,8 @@
 
 **Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.**
 
+![seedcoherent demo](demo/demo.gif)
+
 Faker doesn't understand your schema. `seedcoherent` reads your live database,
 walks the foreign-key graph, and generates data that actually fits: FKs point at
 real parent rows, unique constraints hold, enums use their real values, and
