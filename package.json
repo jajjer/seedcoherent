@@ -9,6 +9,15 @@
   "files": [
     "dist"
   ],
+  "author": "Jacob Jensen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jajjer/seedcoherent.git"
+  },
+  "homepage": "https://github.com/jajjer/seedcoherent#readme",
+  "bugs": {
+    "url": "https://github.com/jajjer/seedcoherent/issues"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
@@ -23,8 +32,11 @@
     "seed",
     "fake-data",
     "synthetic-data",
+    "test-data",
     "faker",
     "database",
+    "database-testing",
+    "data-anonymization",
     "testing",
     "fixtures"
   ],
