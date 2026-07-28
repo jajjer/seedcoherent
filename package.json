@@ -1,6 +1,6 @@
 {
   "name": "seedcoherent",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Schema-aware synthetic data generator. Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.",
   "type": "module",
   "bin": {
@@ -9,6 +9,15 @@
   "files": [
     "dist"
   ],
+  "author": "Jacob Jensen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jajjer/seedcoherent.git"
+  },
+  "homepage": "https://github.com/jajjer/seedcoherent#readme",
+  "bugs": {
+    "url": "https://github.com/jajjer/seedcoherent/issues"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
@@ -23,8 +32,11 @@
     "seed",
     "fake-data",
     "synthetic-data",
+    "test-data",
     "faker",
     "database",
+    "database-testing",
+    "data-anonymization",
     "testing",
     "fixtures"
   ],
