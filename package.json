@@ -1,7 +1,7 @@
 {
   "name": "seedcoherent",
   "version": "0.0.1",
-  "description": "Schema-aware synthetic data generator. Point it at your Postgres schema, get coherent, referentially-correct fake data.",
+  "description": "Schema-aware synthetic data generator. Point it at your Postgres or MySQL schema, get coherent, referentially-correct fake data.",
   "type": "module",
   "bin": {
     "seedcoherent": "dist/cli.js"
@@ -18,6 +18,7 @@
   },
   "keywords": [
     "postgres",
+    "mysql",
     "seed",
     "fake-data",
     "synthetic-data",
@@ -30,6 +31,7 @@
   "dependencies": {
     "@faker-js/faker": "^9.3.0",
     "commander": "^12.1.0",
+    "mysql2": "^3.23.2",
     "pg": "^8.13.1",
     "pg-copy-streams": "^7.0.0"
   },

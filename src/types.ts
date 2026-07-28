@@ -1,5 +1,18 @@
 /** Shared schema + config types used across introspection, inference, and generation. */
 
+/**
+ * Minimal driver-agnostic query surface. Both the Postgres (`pg`) and MySQL
+ * (`mysql2`) clients satisfy this once wrapped, letting introspection and subset
+ * fetching stay driver-neutral. Postgres uses `$1` placeholders, MySQL uses `?`,
+ * so parameterized SQL is written per-dialect.
+ */
+export interface Connection {
+  // Rows default to `any` so existing raw-catalog queries stay ergonomic; typed
+  // call sites (e.g. the MySQL introspector) pass an explicit row shape.
+  query<T = any>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  end(): Promise<void>;
+}
+
 /** A resolved type: its category plus enough to generate/emit a value for it. */
 export interface TypeRef {
   udtName: string;

@@ -1,28 +1,26 @@
 #!/usr/bin/env node
-/** seedcoherent — schema-aware synthetic data generator for Postgres. */
+/** seedcoherent — schema-aware synthetic data generator for Postgres and MySQL. */
 
 import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import pg from "pg";
 import { loadConfig, parseRowSpecs } from "./config.js";
-import { toSql, insertData, CopySink } from "./emit.js";
+import { dialectFor } from "./dialect.js";
 import { buildData, generateInto, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
-import { introspect } from "./introspect.js";
-import { anonymizeAll, collectSubset, PgRowFetcher } from "./subset.js";
+import { anonymizeAll, collectSubset } from "./subset.js";
 import type { Config, TableInfo } from "./types.js";
 
 const program = new Command();
 
 program
   .name("seedcoherent")
-  .description("Point it at your Postgres schema, get coherent, referentially-correct fake data.")
-  .argument("[connection]", "Postgres connection string (or set DATABASE_URL)")
+  .description("Point it at your Postgres or MySQL schema, get coherent, referentially-correct fake data.")
+  .argument("[connection]", "Postgres/MySQL connection string (or set DATABASE_URL)")
   .option("-r, --rows <spec...>", "rows per table, e.g. users=1000 orders=5000", [])
   .option("-d, --default-rows <n>", "default rows for tables not listed", (v) => parseInt(v, 10))
   .option("-s, --seed <n>", "RNG seed for deterministic output", (v) => parseInt(v, 10))
   .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) => parseInt(v, 10))
-  .option("--schema <name...>", "schema(s) to read", ["public"])
+  .option("--schema <name...>", "schema(s)/database(s) to read (default: public / the MySQL database)")
   .option("--skip <table...>", "tables to leave empty", [])
   .option("-c, --config <path>", "path to a config file")
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
@@ -58,12 +56,13 @@ program
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
     };
 
-    const client = new pg.Client({ connectionString: connStr });
-    await client.connect();
+    const dialect = dialectFor(connStr);
+    const schemas: string[] = opts.schema ?? dialect.defaultSchemas(connStr);
+    const client = await dialect.connect(connStr);
     try {
-      const schema = await introspect(client, opts.schema);
+      const schema = await dialect.introspect(client, schemas);
       if (schema.tables.size === 0) {
-        program.error(`No tables found in schema(s): ${opts.schema.join(", ")}`);
+        program.error(`No tables found in schema(s): ${schemas.join(", ") || "(none)"}`);
       }
       const { order, cyclic } = topoSort(schema);
 
@@ -74,7 +73,7 @@ program
         anonymizeAll(
           schema,
           order,
-          await collectSubset(schema, parseRowSpecs(opts.subset), new PgRowFetcher(client)),
+          await collectSubset(schema, parseRowSpecs(opts.subset), dialect.createRowFetcher(client)),
           config,
         );
 
@@ -82,7 +81,7 @@ program
         // SQL emit needs the full dataset in memory to assemble the script.
         const data = isSubset ? await subsetData() : buildData(schema, order, cyclic, config);
         const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
-        const sql = toSql(data);
+        const sql = dialect.toScript(data);
         if (opts.out) {
           await writeFile(opts.out, sql, "utf8");
           console.error(summary(counts(data), cyclic, verb));
@@ -96,21 +95,24 @@ program
           program.error("--subset needs a destination: pass --to <connection>, --out <file>, or --print.");
         }
         const data = await subsetData();
-        const target = new pg.Client({ connectionString: opts.to });
-        await target.connect();
+        const targetDialect = dialectFor(opts.to);
+        const target = await targetDialect.connect(opts.to);
         try {
-          const inserted = await insertData(target, data, { truncate: opts.truncate, batchSize });
+          const inserted = await targetDialect.insertData(target, data, {
+            truncate: opts.truncate,
+            batchSize,
+          });
           console.error(summary(counts(data), cyclic, verb));
           console.error(`\n✓ Inserted ${inserted} rows across ${data.length} tables into --to target`);
         } finally {
           await target.end();
         }
       } else {
-        // From-scratch direct insert: stream generation straight into COPY so
+        // From-scratch direct insert: stream generation straight into the sink so
         // we never hold the whole dataset in memory.
         const skip = new Set(config.skip ?? []);
         const tables = order.filter((t) => !skip.has(t.name) && !skip.has(t.key));
-        const sink = new CopySink(client, { truncate: opts.truncate, tables });
+        const sink = dialect.createSink(client, { truncate: opts.truncate, tables, batchSize });
         const stats = await generateInto(schema, order, cyclic, config, sink, batchSize);
         const filled = stats.filter((s) => s.rows > 0);
         console.error(summary(counts(stats), cyclic, verb));

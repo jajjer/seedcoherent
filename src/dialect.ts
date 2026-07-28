@@ -1,0 +1,129 @@
+/**
+ * Dialect seam: picks the Postgres or MySQL implementation from a connection
+ * string and exposes a uniform surface (connect, introspect, subset fetcher,
+ * bulk-insert sink, offline script) so the CLI stays database-agnostic.
+ */
+
+import pg from "pg";
+import mysql from "mysql2/promise";
+import { CopySink, insertData as insertDataPg, toSql } from "./emit.js";
+import type { RowSink, TableData } from "./generate.js";
+import { introspect } from "./introspect.js";
+import { insertDataMysql, MysqlSink, toSqlMysql } from "./mysql-emit.js";
+import { introspectMysql } from "./mysql-introspect.js";
+import { MysqlRowFetcher } from "./mysql-subset.js";
+import { PgRowFetcher, type RowFetcher } from "./subset.js";
+import type { Connection, Schema, TableInfo } from "./types.js";
+
+export type DialectName = "postgres" | "mysql";
+
+export interface SinkOptions {
+  truncate?: boolean;
+  tables?: TableInfo[];
+  batchSize?: number;
+}
+
+/** A bulk-insert sink that also reports how many rows it has written. */
+export interface SinkHandle extends RowSink {
+  readonly inserted: number;
+}
+
+export interface Dialect {
+  readonly name: DialectName;
+  connect(connStr: string): Promise<Connection>;
+  /** Schema(s) to read when the user passes no --schema. */
+  defaultSchemas(connStr: string): string[];
+  introspect(conn: Connection, schemas: string[]): Promise<Schema>;
+  createRowFetcher(conn: Connection): RowFetcher;
+  createSink(conn: Connection, opts: SinkOptions): SinkHandle;
+  /** Insert already-materialized data (subset path) and return the row count. */
+  insertData(conn: Connection, data: TableData[], opts: SinkOptions): Promise<number>;
+  toScript(data: TableData[]): string;
+}
+
+/** Wraps a `pg.Client` as a driver-neutral Connection, keeping the raw client for COPY. */
+class PgConnection implements Connection {
+  constructor(readonly client: pg.Client) {}
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    return this.client.query<any>(sql, params as any);
+  }
+  end(): Promise<void> {
+    return this.client.end();
+  }
+}
+
+const postgresDialect: Dialect = {
+  name: "postgres",
+  async connect(connStr) {
+    const client = new pg.Client({ connectionString: connStr });
+    await client.connect();
+    return new PgConnection(client);
+  },
+  defaultSchemas() {
+    return ["public"];
+  },
+  introspect(conn, schemas) {
+    return introspect(conn, schemas);
+  },
+  createRowFetcher(conn) {
+    return new PgRowFetcher(conn);
+  },
+  createSink(conn, opts) {
+    return new CopySink((conn as PgConnection).client, { truncate: opts.truncate, tables: opts.tables });
+  },
+  insertData(conn, data, opts) {
+    return insertDataPg((conn as PgConnection).client, data, {
+      truncate: opts.truncate,
+      batchSize: opts.batchSize,
+    });
+  },
+  toScript(data) {
+    return toSql(data);
+  },
+};
+
+/** Wraps a `mysql2` connection as a driver-neutral Connection. */
+class MyConnection implements Connection {
+  constructor(private conn: mysql.Connection) {}
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    const [rows] = await this.conn.query(sql, params);
+    return { rows: rows as unknown as T[] };
+  }
+  end(): Promise<void> {
+    return this.conn.end();
+  }
+}
+
+const mysqlDialect: Dialect = {
+  name: "mysql",
+  async connect(connStr) {
+    return new MyConnection(await mysql.createConnection(connStr));
+  },
+  defaultSchemas(connStr) {
+    try {
+      const db = decodeURIComponent(new URL(connStr).pathname.replace(/^\//, ""));
+      return db ? [db] : [];
+    } catch {
+      return [];
+    }
+  },
+  introspect(conn, schemas) {
+    return introspectMysql(conn, schemas);
+  },
+  createRowFetcher(conn) {
+    return new MysqlRowFetcher(conn);
+  },
+  createSink(conn, opts) {
+    return new MysqlSink(conn, { truncate: opts.truncate, tables: opts.tables }, opts.batchSize);
+  },
+  insertData(conn, data, opts) {
+    return insertDataMysql(conn, data, { truncate: opts.truncate, batchSize: opts.batchSize });
+  },
+  toScript(data) {
+    return toSqlMysql(data);
+  },
+};
+
+export function dialectFor(connStr: string): Dialect {
+  return /^(mysqlx?|mariadb):\/\//i.test(connStr) ? mysqlDialect : postgresDialect;
+}
