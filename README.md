@@ -1,6 +1,6 @@
 # seedcoherent
 
-**Point it at your Postgres or MySQL schema, get coherent, referentially-correct fake data.**
+**Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.**
 
 Faker doesn't understand your schema. `seedcoherent` reads your live database,
 walks the foreign-key graph, and generates data that actually fits: FKs point at
@@ -11,10 +11,13 @@ column *names* drive realistic content — `email` gets emails, `price` gets mon
 ```bash
 npx seedcoherent postgres://localhost/mydb --rows users=1000 orders=5000
 npx seedcoherent mysql://root@localhost/mydb --rows users=1000 orders=5000
+npx seedcoherent ./mydb.sqlite --rows users=1000 orders=5000
 ```
 
-The database is picked from the connection string's scheme (`postgres://` /
-`postgresql://` vs `mysql://`), so the same commands work against either.
+The database is picked from the connection string: a `postgres://` /
+`postgresql://` or `mysql://` scheme selects that engine, while a `sqlite:` /
+`file:` URL, a `:memory:` marker, or a bare path to a `.db` / `.sqlite` /
+`.sqlite3` file selects SQLite — so the same commands work against any of them.
 
 That's it. No config, no schema annotations, no per-column mapping. It introspects
 everything and inserts in dependency order inside a single transaction.
@@ -34,11 +37,15 @@ everything and inserts in dependency order inside a single transaction.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
-- **Two databases, one tool.** Postgres and MySQL, selected from the connection
-  string — same flags, same behavior. On MySQL, `AUTO_INCREMENT` PKs, `ENUM`,
-  `tinyint(1)` booleans, `JSON`, and `CHECK` constraints (8.0.16+) are all
+- **Three databases, one tool.** Postgres, MySQL, and SQLite, selected from the
+  connection string — same flags, same behavior. On MySQL, `AUTO_INCREMENT` PKs,
+  `ENUM`, `tinyint(1)` booleans, `JSON`, and `CHECK` constraints (8.0.16+) are all
   understood; rows stream in as batched multi-row `INSERT`s (MySQL has no `COPY`).
-- **Zero install.** One `npx` command against any Postgres or MySQL database.
+  On SQLite, the `INTEGER PRIMARY KEY` rowid alias, type affinity (with `DATETIME`
+  / `BOOLEAN` / `JSON` hints honored), and `CHECK (x IN (...))` — the idiomatic
+  stand-in for enums — are all understood.
+- **Zero install.** One `npx` command against any Postgres, MySQL, or SQLite
+  database (SQLite needs no server — just a file).
 
 ## Usage
 
@@ -58,8 +65,10 @@ npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
 
 Connection string comes from the first argument or `DATABASE_URL`. A
 `postgres://`/`postgresql://` URL selects Postgres; a `mysql://` URL selects
-MySQL. On Postgres `--schema` defaults to `public`; on MySQL it defaults to the
-database named in the connection string.
+MySQL; a `sqlite:`/`file:` URL, `:memory:`, or a bare `.db`/`.sqlite`/`.sqlite3`
+path selects SQLite. On Postgres `--schema` defaults to `public`; on MySQL it
+defaults to the database named in the connection string; on SQLite it defaults
+to `main`.
 
 ### Options
 
@@ -179,20 +188,21 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 
 1. **Introspect** — reads tables, columns, PKs, unique/foreign-key/check
    constraints, and enum types from the catalog (`pg_catalog` on Postgres,
-   `information_schema` on MySQL). On Postgres it also resolves partition
-   strategy + bounds and full type detail (arrays, composites, ranges, domains).
+   `information_schema` on MySQL, `PRAGMA` + `sqlite_master` on SQLite). On
+   Postgres it also resolves partition strategy + bounds and full type detail
+   (arrays, composites, ranges, domains).
 2. **Order** — topologically sorts tables so parents populate before children;
    cycles and self-references are broken and handled with a deferred pass.
 3. **Infer** — picks a value generator per column from its name and type. The
-   introspectors map both dialects' types onto one category set, so inference
+   introspectors map every dialect's types onto one category set, so inference
    and generation are database-agnostic.
 4. **Generate** — builds rows, drawing FK values from already-generated parents
    and de-duplicating uniques.
 5. **Emit** — streams rows in dependency order, batched (`--batch-size`) so
    generation never holds the whole dataset in memory, all inside one
    transaction: `COPY ... FROM STDIN` on Postgres, batched multi-row `INSERT` on
-   MySQL. `--out`/`--print` write a runnable SQL script for the source dialect
-   instead.
+   MySQL and SQLite. `--out`/`--print` write a runnable SQL script for the source
+   dialect instead.
 
 ## Tests
 
@@ -202,8 +212,10 @@ npm test          # unit tests — no database required
 
 The suite covers the pure logic end-to-end: FK topological ordering, name/type
 inference and overrides, SQL-literal formatting, config parsing, and seeded
-determinism. A live-database integration test (real introspect → generate →
-insert, then asserts zero orphan rows) runs only when `DATABASE_URL` is set:
+determinism. Because SQLite runs in-process, its integration test (real
+introspect → generate → insert, then asserts zero orphan rows) needs no server
+and runs as part of `npm test`. The equivalent Postgres integration test runs
+only when `DATABASE_URL` is set:
 
 ```bash
 docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
@@ -212,18 +224,26 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 
 ## Status
 
-v0 — Postgres and MySQL, with two modes: generate-from-scratch and subset +
-anonymize real production data into staging. On the roadmap: SQLite and hosted
+v0 — Postgres, MySQL, and SQLite, with two modes: generate-from-scratch and
+subset + anonymize real production data into staging. On the roadmap: hosted
 generation.
 
-MySQL support targets a single database per run (the one in the connection
-string, or those named via `--schema`); a subset `--to` a differently-named
-staging database works because writes are unqualified and land in the target
-connection's database. Postgres's richer type detail — arrays, composites,
-ranges, domains, partitioning — has no MySQL equivalent and stays Postgres-only;
-MySQL `CHECK` constraints are read where the server exposes them (MySQL 8.0.16+ /
-MariaDB 10.2+) and honored for the numeric-range and length shapes the parser
-recognizes.
+MySQL and SQLite each target a single database per run (the one in the
+connection string / file, or those named via `--schema`); a subset `--to` a
+different staging database works because writes are unqualified and land in the
+target connection's database. Postgres's richer type detail — arrays,
+composites, ranges, domains, partitioning — has no MySQL or SQLite equivalent
+and stays Postgres-only; MySQL `CHECK` constraints are read where the server
+exposes them (MySQL 8.0.16+ / MariaDB 10.2+) and honored for the numeric-range
+and length shapes the parser recognizes.
+
+SQLite is dynamically typed, so a column's category is inferred from its
+declared type: semantic names (`DATETIME`, `BOOLEAN`, `JSON`, `UUID`) are
+honored first, then SQLite's type-affinity rules. A single-column `INTEGER
+PRIMARY KEY` is treated as the auto-assigned rowid. SQLite exposes no catalog
+view for `CHECK`s, so they're parsed out of the stored `CREATE TABLE` text —
+including `x IN (...)`, the idiomatic stand-in for enums — and honored for the
+numeric-range, length, and membership shapes the parser recognizes.
 
 A few Postgres schema shapes are best-effort: single-column `RANGE`/`LIST`
 partition keys are constrained to a covered partition, but multi-column,
