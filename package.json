@@ -23,6 +23,7 @@
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx test/*.test.ts",
+    "demo": "npm run build && vhs demo/demo.tape",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
