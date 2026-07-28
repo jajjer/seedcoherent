@@ -1,6 +1,6 @@
 {
   "name": "seedcoherent",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Schema-aware synthetic data generator. Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.",
   "type": "module",
   "bin": {

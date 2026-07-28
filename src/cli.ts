@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** seedcoherent — schema-aware synthetic data generator for Postgres and MySQL. */
+/** seedcoherent — schema-aware synthetic data generator for Postgres, MySQL, and SQLite. */
 
 import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
@@ -14,13 +14,18 @@ const program = new Command();
 
 program
   .name("seedcoherent")
-  .description("Point it at your Postgres or MySQL schema, get coherent, referentially-correct fake data.")
-  .argument("[connection]", "Postgres/MySQL connection string (or set DATABASE_URL)")
+  .description(
+    "Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.",
+  )
+  .argument("[connection]", "Postgres/MySQL/SQLite connection string or SQLite file path (or set DATABASE_URL)")
   .option("-r, --rows <spec...>", "rows per table, e.g. users=1000 orders=5000", [])
   .option("-d, --default-rows <n>", "default rows for tables not listed", (v) => parseInt(v, 10))
   .option("-s, --seed <n>", "RNG seed for deterministic output", (v) => parseInt(v, 10))
   .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) => parseInt(v, 10))
-  .option("--schema <name...>", "schema(s)/database(s) to read (default: public / the MySQL database)")
+  .option(
+    "--schema <name...>",
+    "schema(s)/database(s) to read (default: public on Postgres / the MySQL database / main on SQLite)",
+  )
   .option("--skip <table...>", "tables to leave empty", [])
   .option(
     "--distribution <spec...>",
