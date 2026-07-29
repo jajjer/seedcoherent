@@ -4,6 +4,28 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-07-28
+
+### Added
+
+- `--column` (`-C`) exposes per-column generator overrides on the CLI — no
+  config file needed. A bare value is a faker path
+  (`--column users.email=internet.email`), `value:<x>` pins a constant
+  (`--column tier=value:gold`), and `values:<a,b,c>` picks uniformly from a list
+  (`--column status=values:paid,shipped`). `value:`/`values:` tokens are
+  JSON-coerced, so `value:30` is a number and `value:true` a boolean. Repeatable,
+  and merged with (overriding) any `columns` entries from a config file — the
+  same relationship `--rows`/`--distribution` already have with the config file.
+
+### Fixed
+
+- Removed stray literal control-character bytes (NUL `0x00` and SOH `0x01`) from
+  `src/generate.ts`, `src/subset.ts`, and `test/subset.test.ts` — null-value
+  sentinels and uniqueness-key separators written as raw control characters. They
+  are now the equivalent `"\u0000"` / `"\u0001"` escapes, byte-identical at
+  runtime, so the files are plain text (`grep`/`rg` no longer skip them and
+  `git`/`file` no longer treat them as binary). No behavior change.
+
 ## [0.2.0]
 
 ### Added
