@@ -4,7 +4,7 @@
  * touching the target database.
  */
 
-import { buildData, rowCount, type Row } from "./generate.js";
+import { buildData, rowCount, type Row, type TableData } from "./generate.js";
 import type { Config, Schema, TableInfo } from "./types.js";
 
 export interface TablePlan {
@@ -64,9 +64,35 @@ export function buildPlan(
   return { tables, totalRows };
 }
 
+/**
+ * Builds the plan a subset run would follow from its already-collected,
+ * anonymized slice. Unlike the from-scratch plan, the counts here are exact —
+ * the source rows have really been read and closed over their FK parents — and
+ * the sample rows are the actual anonymized values that would land in the
+ * target, so the preview shows exactly what the scrub produces.
+ */
+export function buildSubsetPlan(
+  data: TableData[],
+  cyclic: Set<string>,
+  sampleSize = 3,
+): Plan {
+  const tables: TablePlan[] = data.map((d) => ({
+    key: d.table.key,
+    rows: d.rows.length,
+    cyclic: cyclic.has(d.table.key),
+    skipped: false,
+    sample: d.rows.slice(0, sampleSize),
+  }));
+  const totalRows = tables.reduce((n, t) => n + t.rows, 0);
+  return { tables, totalRows };
+}
+
 /** Render a plan as the human-readable dry-run report. */
-export function formatPlan(plan: Plan): string {
-  const out: string[] = ["Plan (dry run — nothing was written):", ""];
+export function formatPlan(plan: Plan, opts: { subset?: boolean } = {}): string {
+  const header = opts.subset
+    ? "Subset plan (dry run — source read, nothing written):"
+    : "Plan (dry run — nothing was written):";
+  const out: string[] = [header, ""];
 
   const width = plan.tables.reduce((w, t) => Math.max(w, t.key.length), 5);
   out.push(`  ${"#".padStart(3)}  ${"table".padEnd(width)}  ${"rows".padStart(9)}`);

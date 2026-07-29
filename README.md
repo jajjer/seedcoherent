@@ -44,7 +44,10 @@ everything and inserts in dependency order inside a single transaction.
   customers", pagination, and GROUP BY cardinalities behave like production.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
 - **Preview before you write.** `--dry-run` prints the table order, row counts,
-  and a few sample rows without touching the database.
+  and a few sample rows without touching the database. It works for subset +
+  anonymize runs too: the source is read, but the preview shows the real
+  closed-over counts and the actual scrubbed values — nothing is written to the
+  target.
 - **Fast.** ~300k rows/sec end-to-end (generate + insert) on SQLite — a 1.1M-row,
   5-table graph seeds in under 4 seconds on a laptop. Run `npm run benchmark` to
   measure it on your machine.
@@ -162,6 +165,14 @@ To keep the join graph intact, **key columns are passed through verbatim** by
 default — primary keys, foreign-key columns, and any column referenced by a
 foreign key. Anonymized data is never written back to the source — a subset run
 requires `--to`, `--out`, or `--print`.
+
+Add `--dry-run` to preview a subset without writing anywhere: the source is read
+and closed over its FK parents (so the counts are exact, not estimated), and the
+sample rows are the actual anonymized values that would land in the target.
+
+```bash
+npx seedcoherent $PROD_URL --subset orders=500 --dry-run --seed 42
+```
 
 ### Per-column control
 
