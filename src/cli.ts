@@ -7,7 +7,7 @@ import { loadConfig, parseDistSpecs, parseRowSpecs } from "./config.js";
 import { dialectFor } from "./dialect.js";
 import { buildData, generateInto, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
-import { buildPlan, formatPlan } from "./plan.js";
+import { buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
 import type { Config, TableInfo } from "./types.js";
 
@@ -81,14 +81,6 @@ program
 
       const isSubset = opts.subset.length > 0;
 
-      if (opts.dryRun) {
-        if (isSubset) {
-          program.error("--dry-run isn't supported with --subset yet (it would need to read the source rows).");
-        }
-        console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
-        return;
-      }
-
       const batchSize: number | undefined = config.batchSize;
       const verb = isSubset ? "Subset" : "Generated";
       const subsetData = async () =>
@@ -98,6 +90,17 @@ program
           await collectSubset(schema, parseRowSpecs(opts.subset), dialect.createRowFetcher(client)),
           config,
         );
+
+      if (opts.dryRun) {
+        if (isSubset) {
+          // Reading (SELECT) the source is safe; nothing is written. The preview
+          // shows the real closed-over counts and the actual anonymized values.
+          console.error(formatPlan(buildSubsetPlan(await subsetData(), cyclic), { subset: true }));
+        } else {
+          console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
+        }
+        return;
+      }
 
       if (opts.out || opts.print) {
         // SQL emit needs the full dataset in memory to assemble the script.

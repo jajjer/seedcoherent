@@ -2,8 +2,9 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildPlan, formatPlan } from "../src/plan.js";
+import { buildPlan, buildSubsetPlan, formatPlan } from "../src/plan.js";
 import { topoSort } from "../src/graph.js";
+import type { TableData } from "../src/generate.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
 import type { Schema } from "../src/types.js";
 
@@ -66,6 +67,51 @@ test("skipped tables report zero rows and no sample", () => {
   assert.equal(orders.rows, 0);
   assert.equal(orders.skipped, true);
   assert.equal(orders.sample.length, 0);
+});
+
+/** A collected+anonymized subset slice: two users, one order that references them. */
+function subsetData(): { data: TableData[]; cyclic: Set<string> } {
+  const s = usersAndOrders();
+  const users = s.tables.get("public.users")!;
+  const orders = s.tables.get("public.orders")!;
+  const data: TableData[] = [
+    {
+      table: users,
+      columns: users.columns,
+      rows: [
+        { id: 1, email: "fake1@example.com" },
+        { id: 2, email: "fake2@example.com" },
+      ],
+    },
+    {
+      table: orders,
+      columns: orders.columns,
+      rows: [{ id: 100, user_id: 1, total: 42 }],
+    },
+  ];
+  return { data, cyclic: new Set() };
+}
+
+test("buildSubsetPlan reports exact counts and anonymized samples in order", () => {
+  const { data, cyclic } = subsetData();
+  const p = buildSubsetPlan(data, cyclic);
+  assert.deepEqual(
+    p.tables.map((t) => t.key),
+    ["public.users", "public.orders"],
+  );
+  assert.equal(p.tables.find((t) => t.key === "public.users")!.rows, 2);
+  assert.equal(p.tables.find((t) => t.key === "public.orders")!.rows, 1);
+  assert.equal(p.totalRows, 3);
+  // The sample carries the actual (anonymized) values that would be written.
+  assert.equal(p.tables.find((t) => t.key === "public.users")!.sample[0].email, "fake1@example.com");
+});
+
+test("formatPlan marks a subset dry run as source-read, nothing-written", () => {
+  const { data, cyclic } = subsetData();
+  const out = formatPlan(buildSubsetPlan(data, cyclic), { subset: true });
+  assert.match(out, /Subset plan \(dry run — source read, nothing written\)/);
+  assert.match(out, /fake1@example\.com/);
+  assert.match(out, /\b3\b/); // total rows
 });
 
 test("formatPlan renders counts, totals, and sample rows", () => {
