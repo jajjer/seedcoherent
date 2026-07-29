@@ -82,6 +82,12 @@ npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
 # Skew a foreign key so a few parents get most of the children (power-law fan-out)
 npx seedcoherent $DATABASE_URL --rows users=1000 orders=20000 \
   --distribution orders.user_id=zipf
+
+# Steer specific columns: a faker path, a fixed value, or a pick-list
+npx seedcoherent $DATABASE_URL --rows users=1000 \
+  --column users.email=internet.email \
+  --column users.plan=values:free,pro,enterprise \
+  --column users.country=value:Canada
 ```
 
 Connection string comes from the first argument or `DATABASE_URL`. A
@@ -124,6 +130,7 @@ Sample rows:
 | `--schema <name...>` | Schema(s) to read (default: `public`) |
 | `--skip <table...>` | Tables to leave empty |
 | `--distribution <col=kind...>` | FK fan-out per child column, e.g. `orders.user_id=zipf` or `orders.user_id=zipf:2` (default: `uniform`) |
+| `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
 | `-c, --config <path>` | Config file (see below) |
 | `-o, --out <file>` | Write SQL to a file instead of inserting |
 | `--print` | Print SQL to stdout |
@@ -227,7 +234,12 @@ generators or set counts. CLI flags win over the file.
 
 Column overrides accept a faker path (`"internet.email"`), `{ "faker": "..." }`,
 a fixed `{ "value": ... }`, or `{ "values": [...] }` to pick from a list. Keys are
-`table.column` or a bare `column` to apply everywhere.
+`table.column` or a bare `column` to apply everywhere. The same overrides are
+available on the CLI without a config file via `--column`: a bare right-hand side
+is a faker path (`users.email=internet.email`), `value:<x>` is a fixed value
+(`tier=value:gold`), and `values:<a,b,c>` is a pick-list (`status=values:paid,shipped`).
+`value:`/`values:` tokens are JSON-coerced, so `value:30` is the number `30` and
+`value:true` is the boolean; anything that isn't valid JSON stays a string.
 
 `distributions` controls how children fan out across parents, keyed by the child
 FK column (same key forms as `columns`, and matching the `--distribution` flag).

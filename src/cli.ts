@@ -3,7 +3,7 @@
 
 import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { loadConfig, parseDistSpecs, parseRowSpecs } from "./config.js";
+import { loadConfig, parseColumnSpecs, parseDistSpecs, parseRowSpecs } from "./config.js";
 import { dialectFor } from "./dialect.js";
 import { buildData, generateInto, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
@@ -33,6 +33,11 @@ program
     "FK fan-out per child column, e.g. orders.user_id=zipf or orders.user_id=zipf:2 (default uniform)",
     [],
   )
+  .option(
+    "-C, --column <spec...>",
+    "override a column's generator: users.email=internet.email, status=values:active,inactive, or tier=value:gold",
+    [],
+  )
   .option("-c, --config <path>", "path to a config file")
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
@@ -60,6 +65,7 @@ program
     const config: Config = {
       ...fileConfig,
       rows: { ...fileConfig.rows, ...parseRowSpecs(opts.rows) },
+      columns: { ...fileConfig.columns, ...parseColumnSpecs(opts.column) },
       defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
       seed: opts.seed ?? fileConfig.seed,
       batchSize: opts.batchSize ?? fileConfig.batchSize,
