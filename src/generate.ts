@@ -48,6 +48,22 @@ export interface TableStats {
   rows: number;
 }
 
+/**
+ * Append mode: generate new rows into a database that already holds data.
+ * Rather than building every parent pool from scratch, FK columns can draw from
+ * rows already in the target, and synthetic PK counters continue past the
+ * existing maximum so new rows don't collide.
+ */
+export interface AppendContext {
+  /** table.key -> existing rows to draw FK parents from (pre-seeds the pool). */
+  existing: Map<string, Row[]>;
+  /** table.key -> first synthetic id to assign (max existing id + 1). */
+  startIds: Map<string, number>;
+  /** table.keys to actually generate new rows for; all others only contribute
+   *  their existing pool and emit nothing. */
+  generate: Set<string>;
+}
+
 const NULL_PROBABILITY = 0.08;
 const UNIQUE_RETRIES = 25;
 
@@ -83,6 +99,7 @@ export function* streamData(
   cyclic: Set<string>,
   config: Config,
   batchSize: number = DEFAULT_BATCH_SIZE,
+  append?: AppendContext,
 ): IterableIterator<Batch> {
   const faker = new Faker({ locale: [en] });
   if (config.seed !== undefined) {
@@ -94,9 +111,15 @@ export function* streamData(
 
   const skip = new Set(config.skip ?? []);
   const generated = new Map<string, Row[]>(); // table.key -> rows (for FK lookups)
+  // In append mode, pre-seed the FK pools with rows already in the target so new
+  // children can reference existing parents.
+  if (append) for (const [key, rows] of append.existing) generated.set(key, rows);
 
   for (const table of order) {
     if (skip.has(table.name) || skip.has(table.key)) continue;
+    // Append mode only generates the tables the user asked for; every other
+    // table just lends its existing pool (seeded above) and emits nothing.
+    if (append && !append.generate.has(table.key)) continue;
 
     const emitCols = table.columns.filter((c) => !isDbAssigned(c));
     // Distill CHECK constraints into per-column bounds the generators honor.
@@ -133,7 +156,9 @@ export function* streamData(
     const uniqueSets = [table.primaryKey, ...table.uniques].filter((u) => u.length > 0);
     const seen = uniqueSets.map(() => new Set<string>());
 
-    let idCounter = 1;
+    // Synthetic ids continue past whatever is already in the target (append),
+    // else start at 1.
+    let idCounter = append?.startIds.get(table.key) ?? 1;
     for (let i = 0; i < count; i++) {
       let row: Row | null = null;
 
@@ -190,11 +215,12 @@ export function buildData(
   order: TableInfo[],
   cyclic: Set<string>,
   config: Config,
+  append?: AppendContext,
 ): TableData[] {
   const result: TableData[] = [];
   let current: TableData | null = null;
   // One unbounded batch per table keeps this a simple regrouping of streamData.
-  for (const batch of streamData(schema, order, cyclic, config, Infinity)) {
+  for (const batch of streamData(schema, order, cyclic, config, Infinity, append)) {
     if (!current || current.table !== batch.table) {
       current = { table: batch.table, rows: [], columns: batch.columns };
       result.push(current);
@@ -216,12 +242,13 @@ export async function generateInto(
   config: Config,
   sink: RowSink,
   batchSize: number = DEFAULT_BATCH_SIZE,
+  append?: AppendContext,
 ): Promise<TableStats[]> {
   const stats: TableStats[] = [];
   let currentTable: TableInfo | null = null;
   let count = 0;
 
-  for (const batch of streamData(schema, order, cyclic, config, batchSize)) {
+  for (const batch of streamData(schema, order, cyclic, config, batchSize, append)) {
     if (batch.table !== currentTable) {
       await sink.begin(batch.table, batch.columns);
       currentTable = batch.table;
@@ -262,7 +289,7 @@ export class CollectSink implements RowSink {
 }
 
 /** A single-column integer PK with a DB default/identity → we assign 1..N. */
-function usesSyntheticId(table: TableInfo): boolean {
+export function usesSyntheticId(table: TableInfo): boolean {
   if (table.primaryKey.length !== 1) return false;
   const col = table.columns.find((c) => c.name === table.primaryKey[0]);
   return !!col && (col.isIdentity || col.hasDefault) && col.dataType === "integer";
@@ -332,8 +359,9 @@ function valueForColumn(
 }
 
 function nextIdPeek(table: TableInfo, nextId: () => number): unknown {
-  // For a non-null self-ref on row 0, reference id 1 (itself).
-  return usesSyntheticId(table) ? 1 : null;
+  // For a non-null self-ref on row 0, reference the id this row is about to get
+  // (itself) — 1 for a fresh run, or the append start id.
+  return usesSyntheticId(table) ? nextId() : null;
 }
 
 function isInAnyUnique(table: TableInfo, colName: string): boolean {

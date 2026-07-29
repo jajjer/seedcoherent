@@ -4,7 +4,7 @@
  * touching the target database.
  */
 
-import { buildData, rowCount, type Row, type TableData } from "./generate.js";
+import { buildData, rowCount, type AppendContext, type Row, type TableData } from "./generate.js";
 import type { Config, Schema, TableInfo } from "./types.js";
 
 export interface TablePlan {
@@ -65,6 +65,43 @@ export function buildPlan(
 }
 
 /**
+ * Builds the plan an append run would follow: only the tables being grown appear
+ * (others just lend existing rows), and the sample rows are generated with the
+ * real append context so FK columns show values drawn from the existing parents.
+ */
+export function buildAppendPlan(
+  schema: Schema,
+  order: TableInfo[],
+  cyclic: Set<string>,
+  config: Config,
+  append: AppendContext,
+  sampleSize = 3,
+): Plan {
+  const capped: Config = {
+    ...config,
+    rows: Object.fromEntries(
+      Object.entries(config.rows ?? {}).map(([k, v]) => [k, Math.min(v, sampleSize)]),
+    ),
+  };
+  const sampled = new Map<string, Row[]>();
+  for (const d of buildData(schema, order, cyclic, capped, append)) {
+    sampled.set(d.table.key, d.rows.slice(0, sampleSize));
+  }
+
+  const tables: TablePlan[] = order
+    .filter((t) => append.generate.has(t.key))
+    .map((t) => ({
+      key: t.key,
+      rows: rowCount(t, config),
+      cyclic: cyclic.has(t.key),
+      skipped: false,
+      sample: sampled.get(t.key) ?? [],
+    }));
+  const totalRows = tables.reduce((n, t) => n + t.rows, 0);
+  return { tables, totalRows };
+}
+
+/**
  * Builds the plan a subset run would follow from its already-collected,
  * anonymized slice. Unlike the from-scratch plan, the counts here are exact —
  * the source rows have really been read and closed over their FK parents — and
@@ -88,10 +125,12 @@ export function buildSubsetPlan(
 }
 
 /** Render a plan as the human-readable dry-run report. */
-export function formatPlan(plan: Plan, opts: { subset?: boolean } = {}): string {
+export function formatPlan(plan: Plan, opts: { subset?: boolean; append?: boolean } = {}): string {
   const header = opts.subset
     ? "Subset plan (dry run — source read, nothing written):"
-    : "Plan (dry run — nothing was written):";
+    : opts.append
+      ? "Append plan (dry run — existing rows read, nothing written):"
+      : "Plan (dry run — nothing was written):";
   const out: string[] = [header, ""];
 
   const width = plan.tables.reduce((w, t) => Math.max(w, t.key.length), 5);

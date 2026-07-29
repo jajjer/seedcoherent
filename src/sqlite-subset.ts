@@ -1,7 +1,7 @@
 /** Live-SQLite implementation of the subset RowFetcher (`?` placeholders). */
 
 import type { Row } from "./generate.js";
-import type { RowFetcher } from "./subset.js";
+import { toInt, type RowFetcher } from "./subset.js";
 import type { Connection, TableInfo } from "./types.js";
 
 const KEY_CHUNK = 500;
@@ -52,5 +52,10 @@ export class SqliteRowFetcher implements RowFetcher {
       }
     }
     return rows;
+  }
+
+  async maxInt(table: TableInfo, column: string): Promise<number | null> {
+    const res = await this.conn.query<Row>(`SELECT MAX(${ident(column)}) AS m FROM ${ref(table)}`);
+    return toInt(res.rows[0]?.m);
   }
 }
