@@ -96,6 +96,30 @@ const NAME_RULES: NameRule[] = [
   { test: tok("uuid", "guid"), gen: (f) => f.string.uuid() },
 ];
 
+type NumericRule = { test: (c: MatchCtx) => boolean; gen: (f: Faker, col: ColumnInfo) => number };
+
+/**
+ * Name rules for numeric columns. `NAME_RULES` only apply to text/date columns,
+ * so without these an `integer`/`numeric` column named `age` or `rating` would
+ * fall through to a generic 0..1,000,000 range. First match wins.
+ */
+const NUMERIC_NAME_RULES: NumericRule[] = [
+  { test: tok("age"), gen: (f) => f.number.int({ min: 0, max: 95 }) },
+  { test: tok("year"), gen: (f) => f.number.int({ min: 1970, max: 2025 }) },
+  { test: or(has("quantity"), tok("qty")), gen: (f) => f.number.int({ min: 1, max: 100 }) },
+  { test: tok("rating", "stars"), gen: (f) => f.number.int({ min: 1, max: 5 }) },
+  { test: tok("score", "points"), gen: (f) => f.number.int({ min: 0, max: 100 }) },
+  { test: or(has("percentage"), tok("percent", "discount")), gen: (f) => f.number.int({ min: 0, max: 100 }) },
+  { test: tok("count"), gen: (f) => f.number.int({ min: 0, max: 1000 }) },
+  {
+    test: or(has("price", "amount", "subtotal", "salary"), tok("cost", "total", "balance", "fee")),
+    gen: (f, col) => {
+      const val = f.number.float({ min: 0, max: 10_000, fractionDigits: Math.min(col.numericScale ?? 2, 6) });
+      return col.dataType === "integer" ? Math.round(val) : val;
+    },
+  },
+];
+
 /** Type-category fallback when no name rule matches. */
 function generatorForType(col: ColumnInfo): Generator {
   const max = col.maxLength ?? undefined;
@@ -253,6 +277,12 @@ function baseGenerator(table: TableInfo, col: ColumnInfo): Generator {
   if (col.dataType === "enum") return generatorForType(col);
 
   const ctx: MatchCtx = { n: norm(col.name), tokens: tokenize(col.name) };
+  // Numeric columns get their own name rules; text/date name rules can't apply.
+  if (col.dataType === "integer" || col.dataType === "decimal") {
+    for (const rule of NUMERIC_NAME_RULES) {
+      if (rule.test(ctx)) return (f) => rule.gen(f, col);
+    }
+  }
   for (const rule of NAME_RULES) {
     if (rule.test(ctx)) {
       // Only accept a name-based text/date rule if the column type is compatible;

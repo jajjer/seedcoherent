@@ -220,3 +220,55 @@ test("invalid faker path throws when invoked", () => {
   const g = inferGenerator(table("t", { columns: [c] }), c, { x: "not.a.real.path" });
   assert.throws(() => g(faker()), /Invalid faker path/);
 });
+
+// --- numeric name heuristics -------------------------------------------------
+
+/** Draw N values from a column's generator to assert a whole range stays sane. */
+function samples(c: ReturnType<typeof col>, n = 200): number[] {
+  const t = table("t", { columns: [c] });
+  const g = inferGenerator(t, c);
+  const f = faker();
+  return Array.from({ length: n }, () => g(f) as number);
+}
+
+test("age integer column stays in a human range", () => {
+  const vals = samples(col("age", { udtName: "int4" }));
+  assert.ok(vals.every((v) => Number.isInteger(v) && v >= 0 && v <= 95), `out of range: ${Math.max(...vals)}`);
+});
+
+test("year column produces plausible years", () => {
+  const vals = samples(col("birth_year", { udtName: "int4" }));
+  assert.ok(vals.every((v) => v >= 1970 && v <= 2025));
+});
+
+test("quantity column is a small positive count", () => {
+  const vals = samples(col("quantity", { udtName: "int4" }));
+  assert.ok(vals.every((v) => v >= 1 && v <= 100));
+});
+
+test("rating column stays within 1..5", () => {
+  const vals = samples(col("rating", { udtName: "int4" }));
+  assert.ok(vals.every((v) => v >= 1 && v <= 5));
+});
+
+test("discount percent stays within 0..100", () => {
+  const vals = samples(col("discount_percent", { udtName: "int4" }));
+  assert.ok(vals.every((v) => v >= 0 && v <= 100));
+});
+
+test("price numeric column honors scale and a realistic ceiling", () => {
+  const vals = samples(col("price", { udtName: "numeric", numericScale: 2 }));
+  assert.ok(vals.every((v) => v >= 0 && v <= 10_000));
+  // At most 2 decimal places.
+  assert.ok(vals.every((v) => Number.isInteger(Math.round(v * 100))));
+});
+
+test("integer-typed amount column rounds to a whole number", () => {
+  const vals = samples(col("amount_cents", { udtName: "int4" }));
+  assert.ok(vals.every((v) => Number.isInteger(v)));
+});
+
+test("numeric name rules never fire on a text column", () => {
+  const v = gen(col("age", { udtName: "text" }));
+  assert.equal(typeof v, "string");
+});

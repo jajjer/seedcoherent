@@ -51,7 +51,7 @@ export interface TableStats {
 const NULL_PROBABILITY = 0.08;
 const UNIQUE_RETRIES = 25;
 
-function rowCount(table: TableInfo, config: Config): number {
+export function rowCount(table: TableInfo, config: Config): number {
   const byName = config.rows?.[table.name] ?? config.rows?.[table.key];
   return byName ?? config.defaultRows ?? 10;
 }
