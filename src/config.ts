@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import type { Config, DistSpec } from "./types.js";
+import type { Config, ColumnOverride, DistSpec } from "./types.js";
 
 const DEFAULT_NAMES = ["seed.config.json", "seed.config.js", "seed.config.mjs"];
 
@@ -71,6 +71,52 @@ export function parseDistSpecs(specs: string[]): Record<string, DistSpec> {
       }
     } else {
       throw new Error(`Unknown distribution "${kind}" in "${spec}" (use uniform or zipf)`);
+    }
+  }
+  return out;
+}
+
+/** Coerce a CLI literal token to JSON if it parses (numbers, booleans, null), else keep the raw string. */
+function coerceLiteral(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Parse repeated `column=generator` CLI flags into a per-column override map,
+ * mirroring the config file's `columns` field. The right-hand side is one of:
+ *   - a faker path, e.g. `users.email=internet.email` → resolve that generator
+ *   - `value:<literal>`, e.g. `tier=value:gold` → the constant value every row
+ *   - `values:<a,b,c>`, e.g. `status=values:active,inactive` → pick uniformly
+ * `value:`/`values:` tokens are JSON-coerced (`value:30` → 30, `value:true` →
+ * true), falling back to the raw string. Keyed by "table.column",
+ * "schema.table.column", or bare "column" — same forms as name inference.
+ */
+export function parseColumnSpecs(specs: string[]): Record<string, ColumnOverride> {
+  const out: Record<string, ColumnOverride> = {};
+  for (const spec of specs) {
+    // Split on the first '=': the column key never contains '=', but a literal
+    // value on the right-hand side might (e.g. value:a=b).
+    const eq = spec.indexOf("=");
+    if (eq === -1) throw new Error(`Invalid --column spec "${spec}" (expected column=generator)`);
+    const column = spec.slice(0, eq).trim();
+    const rhs = spec.slice(eq + 1);
+    if (!column) throw new Error(`Invalid --column spec "${spec}" (empty column)`);
+    if (!rhs) throw new Error(`Invalid --column spec "${spec}" (empty generator)`);
+
+    if (rhs.startsWith("value:")) {
+      out[column] = { value: coerceLiteral(rhs.slice("value:".length)) };
+    } else if (rhs.startsWith("values:")) {
+      const items = rhs.slice("values:".length).split(",").map((s) => s.trim());
+      if (items.length === 0 || (items.length === 1 && items[0] === "")) {
+        throw new Error(`Empty values list in "${spec}" (expected values:a,b,c)`);
+      }
+      out[column] = { values: items.map(coerceLiteral) };
+    } else {
+      out[column] = rhs; // a faker path like "internet.email"
     }
   }
   return out;

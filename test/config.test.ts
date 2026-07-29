@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, parseRowSpecs } from "../src/config.js";
+import { loadConfig, parseColumnSpecs, parseRowSpecs } from "../src/config.js";
 
 test("parseRowSpecs parses table=count pairs", () => {
   assert.deepEqual(parseRowSpecs(["users=1000", "orders=5000"]), {
@@ -33,6 +33,48 @@ test("parseRowSpecs rejects non-numeric or negative counts", () => {
 
 test("parseRowSpecs handles an empty list", () => {
   assert.deepEqual(parseRowSpecs([]), {});
+});
+
+test("parseColumnSpecs treats a bare right-hand side as a faker path", () => {
+  assert.deepEqual(parseColumnSpecs(["users.email=internet.email"]), {
+    "users.email": "internet.email",
+  });
+});
+
+test("parseColumnSpecs parses value: into a constant, coercing JSON literals", () => {
+  assert.deepEqual(parseColumnSpecs(["tier=value:gold", "age=value:30", "active=value:true"]), {
+    tier: { value: "gold" },
+    age: { value: 30 },
+    active: { value: true },
+  });
+});
+
+test("parseColumnSpecs parses values: into a coerced pick list", () => {
+  assert.deepEqual(parseColumnSpecs(["status=values:active,inactive", "n=values:1,2,3"]), {
+    status: { values: ["active", "inactive"] },
+    n: { values: [1, 2, 3] },
+  });
+});
+
+test("parseColumnSpecs keeps a value: literal that itself contains '='", () => {
+  assert.deepEqual(parseColumnSpecs(["cfg=value:a=b"]), { cfg: { value: "a=b" } });
+});
+
+test("parseColumnSpecs keys off the first '=', so schema-qualified names work", () => {
+  assert.deepEqual(parseColumnSpecs(["public.users.email=internet.email"]), {
+    "public.users.email": "internet.email",
+  });
+});
+
+test("parseColumnSpecs rejects specs without '=', empty sides, and empty value lists", () => {
+  assert.throws(() => parseColumnSpecs(["users.email"]), /expected column=generator/);
+  assert.throws(() => parseColumnSpecs(["=internet.email"]), /empty column/);
+  assert.throws(() => parseColumnSpecs(["users.email="]), /empty generator/);
+  assert.throws(() => parseColumnSpecs(["status=values:"]), /Empty values list/);
+});
+
+test("parseColumnSpecs handles an empty list", () => {
+  assert.deepEqual(parseColumnSpecs([]), {});
 });
 
 test("loadConfig reads a JSON config from an explicit path", async () => {
