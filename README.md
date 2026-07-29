@@ -42,6 +42,11 @@ everything and inserts in dependency order inside a single transaction.
   a `zipf` distribution and a few parents collect most of the children while the
   rest thin into a long tail — the lopsided shape real data has — so "top
   customers", pagination, and GROUP BY cardinalities behave like production.
+- **Grows existing data, not just fresh schemas.** `--append` adds rows to a
+  database that already has data: only the tables you name grow, their foreign
+  keys reference the rows already there, and synthetic ids continue past the
+  current max so nothing collides. "Add 5,000 orders to my existing users" is one
+  flag.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
 - **Preview before you write.** `--dry-run` prints the table order, row counts,
   and a few sample rows without touching the database. It works for subset +
@@ -135,6 +140,7 @@ Sample rows:
 | `-o, --out <file>` | Write SQL to a file instead of inserting |
 | `--print` | Print SQL to stdout |
 | `--dry-run` | Preview table order, row counts, and sample rows without writing |
+| `--append` | Add rows to a database that already has data (see below) |
 | `--truncate` | `TRUNCATE ... RESTART IDENTITY CASCADE` before inserting |
 | `--subset <table=n...>` | Subset + anonymize real data (see below) |
 | `--to <connection>` | Target DB to insert the anonymized subset into |
@@ -206,6 +212,41 @@ the same fake across every table, so referential integrity is preserved.
 Columns are matched as `table.column`, `schema.table.column`, or a bare
 `column`. Both flags also read from `anonymize` / `preserve` arrays in the
 [config file](#config-file).
+
+## Append to a database that already has data
+
+A from-scratch run assumes an empty (or truncated) database. `--append` instead
+**grows a database you already have** — add more orders to your existing users,
+top up a test dataset, or backfill a new table against real ones:
+
+```bash
+# Add 5,000 orders that reference the users already in the database.
+npx seedcoherent postgres://localhost/mydb --append --rows orders=5000
+
+# Preview it first — existing rows are read to build the FK pools, nothing is written.
+npx seedcoherent postgres://localhost/mydb --append --rows orders=5000 --dry-run
+```
+
+What append does differently:
+
+- **Only the tables you name in `--rows` grow.** Every other table is left
+  untouched (`--default-rows` is ignored — append never writes to a table you
+  didn't ask for).
+- **Foreign keys reference rows already in the database.** For any parent table
+  you are *not* growing, a sample of its existing rows (up to 100k) is read and
+  used as the FK pool, so new children point at real existing parents. Grow both
+  a parent and its child in the same run and the child references the *new*
+  parents instead.
+- **Synthetic ids continue past the current max.** A serial/identity/auto-
+  increment PK starts at `MAX(id) + 1`, so new rows never collide with existing
+  ones. On Postgres the sequence is then reset to the new max, so later
+  application inserts stay clean.
+
+`--append` is its own mode: it can't be combined with `--subset` (a different
+source→target flow) or `--truncate` (which would delete the data you're
+appending to). Uniqueness of *generated* columns is enforced within the run;
+collisions against values already in the table are possible for non-synthetic
+unique keys, the same best-effort guarantee generation gives elsewhere.
 
 ## Config file
 
@@ -301,8 +342,9 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 
 ## Status
 
-v0 — Postgres, MySQL, and SQLite, with two modes: generate-from-scratch and
-subset + anonymize real production data into staging. On the roadmap: hosted
+v0 — Postgres, MySQL, and SQLite, with three modes: generate-from-scratch,
+append to an already-populated database, and subset + anonymize real production
+data into staging. On the roadmap: hosted
 generation.
 
 MySQL and SQLite each target a single database per run (the one in the
