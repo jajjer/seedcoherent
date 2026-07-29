@@ -158,7 +158,7 @@ export function* streamData(
           );
         }
         // Check every unique constraint.
-        const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join(""));
+        const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join("\u0001"));
         const collision = keys.some((k, idx) => seen[idx].has(k));
         if (!collision) {
           keys.forEach((k, idx) => seen[idx].add(k));
@@ -342,7 +342,7 @@ function isInAnyUnique(table: TableInfo, colName: string): boolean {
 }
 
 function serializeKey(v: unknown): string {
-  if (v === null || v === undefined) return " ";
+  if (v === null || v === undefined) return "\u0000";
   if (v instanceof Date) return v.toISOString();
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
