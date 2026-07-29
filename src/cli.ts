@@ -7,6 +7,7 @@ import { loadConfig, parseDistSpecs, parseRowSpecs } from "./config.js";
 import { dialectFor } from "./dialect.js";
 import { buildData, generateInto, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
+import { buildPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
 import type { Config, TableInfo } from "./types.js";
 
@@ -35,6 +36,7 @@ program
   .option("-c, --config <path>", "path to a config file")
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
+  .option("--dry-run", "preview the plan (table order, row counts, sample rows) without writing")
   .option("--truncate", "TRUNCATE target tables before inserting")
   .option(
     "--subset <spec...>",
@@ -78,6 +80,15 @@ program
       const { order, cyclic } = topoSort(schema);
 
       const isSubset = opts.subset.length > 0;
+
+      if (opts.dryRun) {
+        if (isSubset) {
+          program.error("--dry-run isn't supported with --subset yet (it would need to read the source rows).");
+        }
+        console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
+        return;
+      }
+
       const batchSize: number | undefined = config.batchSize;
       const verb = isSubset ? "Subset" : "Generated";
       const subsetData = async () =>
