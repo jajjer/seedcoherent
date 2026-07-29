@@ -5,9 +5,10 @@ import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { loadConfig, parseColumnSpecs, parseDistSpecs, parseRowSpecs } from "./config.js";
 import { dialectFor } from "./dialect.js";
-import { buildData, generateInto, type TableStats } from "./generate.js";
+import { appendTargets, planAppend } from "./append.js";
+import { buildData, generateInto, type AppendContext, type TableStats } from "./generate.js";
 import { topoSort } from "./graph.js";
-import { buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
+import { buildAppendPlan, buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
 import type { Config, TableInfo } from "./types.js";
 
@@ -42,6 +43,10 @@ program
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
   .option("--dry-run", "preview the plan (table order, row counts, sample rows) without writing")
+  .option(
+    "--append",
+    "add rows to a database that already has data: only --rows tables are grown, their FKs reference existing rows, and synthetic ids continue past the current max",
+  )
   .option("--truncate", "TRUNCATE target tables before inserting")
   .option(
     "--subset <spec...>",
@@ -86,9 +91,25 @@ program
       const { order, cyclic } = topoSort(schema);
 
       const isSubset = opts.subset.length > 0;
+      const isAppend = !!opts.append;
+      if (isAppend && isSubset) {
+        program.error("--append and --subset are separate modes; use one at a time.");
+      }
+      if (isAppend && opts.truncate) {
+        program.error("--append adds rows to existing data; --truncate would delete it first.");
+      }
+
+      // Append grows only the tables named via --rows; nothing to do otherwise.
+      let appendCtx: AppendContext | undefined;
+      if (isAppend) {
+        if (appendTargets(schema, config).size === 0) {
+          program.error("--append needs at least one table to grow: pass --rows <table>=<n>.");
+        }
+        appendCtx = await planAppend(schema, order, config, dialect.createRowFetcher(client));
+      }
 
       const batchSize: number | undefined = config.batchSize;
-      const verb = isSubset ? "Subset" : "Generated";
+      const verb = isSubset ? "Subset" : isAppend ? "Appended" : "Generated";
       const subsetData = async () =>
         anonymizeAll(
           schema,
@@ -102,6 +123,11 @@ program
           // Reading (SELECT) the source is safe; nothing is written. The preview
           // shows the real closed-over counts and the actual anonymized values.
           console.error(formatPlan(buildSubsetPlan(await subsetData(), cyclic), { subset: true }));
+        } else if (isAppend) {
+          // Existing rows were read (SELECT) to build the FK pools; nothing written.
+          console.error(
+            formatPlan(buildAppendPlan(schema, order, cyclic, config, appendCtx!), { append: true }),
+          );
         } else {
           console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
         }
@@ -110,7 +136,9 @@ program
 
       if (opts.out || opts.print) {
         // SQL emit needs the full dataset in memory to assemble the script.
-        const data = isSubset ? await subsetData() : buildData(schema, order, cyclic, config);
+        const data = isSubset
+          ? await subsetData()
+          : buildData(schema, order, cyclic, config, appendCtx);
         const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
         const sql = dialect.toScript(data);
         if (opts.out) {
@@ -139,12 +167,22 @@ program
           await target.end();
         }
       } else {
-        // From-scratch direct insert: stream generation straight into the sink so
-        // we never hold the whole dataset in memory.
+        // Direct insert (from-scratch or append): stream generation straight into
+        // the sink so we never hold the whole dataset in memory. Append writes only
+        // the grown tables and never truncates.
         const skip = new Set(config.skip ?? []);
-        const tables = order.filter((t) => !skip.has(t.name) && !skip.has(t.key));
-        const sink = dialect.createSink(client, { truncate: opts.truncate, tables, batchSize });
-        const stats = await generateInto(schema, order, cyclic, config, sink, batchSize);
+        const tables = order.filter(
+          (t) =>
+            !skip.has(t.name) &&
+            !skip.has(t.key) &&
+            (!appendCtx || appendCtx.generate.has(t.key)),
+        );
+        const sink = dialect.createSink(client, {
+          truncate: isAppend ? false : opts.truncate,
+          tables,
+          batchSize,
+        });
+        const stats = await generateInto(schema, order, cyclic, config, sink, batchSize, appendCtx);
         const filled = stats.filter((s) => s.rows > 0);
         console.error(summary(counts(stats), cyclic, verb));
         console.error(`\n✓ Inserted ${sink.inserted} rows across ${filled.length} tables`);

@@ -4,6 +4,21 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-07-29
+
+### Added
+
+- `--append` grows a database that **already holds data** instead of generating
+  from scratch. Only the tables named via `--rows` get new rows; every foreign
+  key that points at a table you are *not* growing is filled from rows already in
+  the database (a sample of up to 100k existing parents), so new children
+  reference real existing parents. Synthetic integer PKs continue past the
+  current `MAX(id)` rather than restarting at 1, so new rows never collide with
+  existing ones — and on Postgres the serial/identity sequence is reset to the
+  new max afterward, so later app inserts stay clean. Works with `--dry-run`
+  (existing rows are read to build the preview, nothing is written) and with
+  `--out`/`--print`. Rejected together with `--subset` or `--truncate`.
+
 ## [0.3.0] — 2026-07-28
 
 ### Added

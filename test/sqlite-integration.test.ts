@@ -15,6 +15,7 @@ import { SqliteRowFetcher } from "../src/sqlite-subset.js";
 import { topoSort } from "../src/graph.js";
 import { buildData, generateInto } from "../src/generate.js";
 import { anonymizeAll, collectSubset } from "../src/subset.js";
+import { planAppend } from "../src/append.js";
 import type { Connection } from "../src/types.js";
 
 const SCHEMA_DDL = `
@@ -125,6 +126,44 @@ test("toSqlSqlite emits a script that loads the same data", async () => {
   target.exec(toSqlSqlite(data));
   assertValid(target);
   target.close();
+  db.close();
+});
+
+test("append adds rows to a populated SQLite DB referencing existing parents", async () => {
+  const { db, conn } = freshDb();
+  // Seed real existing data: 3 users, 2 orders.
+  db.exec(`
+    INSERT INTO users (id, email, full_name, role, created_at) VALUES
+      (1,'a@x.com','Alice','admin','2025-01-01T00:00:00Z'),
+      (2,'b@x.com','Bob','member','2025-01-01T00:00:00Z'),
+      (3,'c@x.com','Carol','guest','2025-01-01T00:00:00Z');
+    INSERT INTO orders (id, user_id, status, total) VALUES (10,1,'paid',5.00),(11,2,'pending',9.00);
+  `);
+
+  const schema = await introspectSqlite(conn, ["main"]);
+  const { order, cyclic } = topoSort(schema);
+  const config = { rows: { orders: 30 }, seed: 42 };
+
+  // Grow only orders; users is read for the FK pool, its rows untouched.
+  const ctx = await planAppend(schema, order, config, new SqliteRowFetcher(conn));
+  const grown = order.filter((t) => ctx.generate.has(t.key));
+  const sink = new SqliteSink(conn, { truncate: false, tables: grown }, 8);
+  const stats = await generateInto(schema, order, cyclic, config, sink, 8, ctx);
+
+  // Users were left alone; orders grew by 30 (2 existing + 30 new).
+  assert.equal(sink.inserted, 30);
+  assert.equal(new Map(stats.map((s) => [s.table.name, s.rows])).get("orders"), 30);
+  assert.equal(count(db, "SELECT count(*) n FROM users"), 3);
+  assert.equal(count(db, "SELECT count(*) n FROM orders"), 32);
+
+  // Every order — old and new — points at a real user; no orphans, no dup ids.
+  assert.equal(
+    count(db, "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL"),
+    0,
+  );
+  assert.equal(count(db, "SELECT count(*)-count(DISTINCT id) n FROM orders"), 0);
+  // New ids continued past the existing max (10, 11) rather than colliding at 1.
+  assert.equal(count(db, "SELECT count(*) n FROM orders WHERE id > 11"), 30);
   db.close();
 });
 

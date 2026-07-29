@@ -26,6 +26,12 @@ export interface RowFetcher {
   fetchRoots(table: TableInfo, limit: number): Promise<Row[]>;
   /** Rows whose `columns` tuple matches one of `keys` — for pulling parents. */
   fetchByKeys(table: TableInfo, columns: string[], keys: unknown[][]): Promise<Row[]>;
+  /**
+   * The largest value of an integer `column` currently in `table`, or `null` if
+   * the table is empty. Used by append mode to continue a synthetic PK sequence
+   * past the rows already present.
+   */
+  maxInt(table: TableInfo, column: string): Promise<number | null>;
 }
 
 const KEY_CHUNK = 1000;
@@ -76,6 +82,18 @@ export class PgRowFetcher implements RowFetcher {
     }
     return rows;
   }
+
+  async maxInt(table: TableInfo, column: string): Promise<number | null> {
+    const res = await this.client.query(`SELECT MAX(${ident(column)}) AS m FROM ${qual(table)}`);
+    return toInt(res.rows[0]?.m);
+  }
+}
+
+/** Coerce a driver's MAX() result (number, bigint, string, or null) to a number. */
+export function toInt(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v); // handles number, bigint, and numeric string alike
+  return Number.isFinite(n) ? n : null;
 }
 
 /** Resolve a root spec ("users" or "public.users") to a table. */
