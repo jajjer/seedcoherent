@@ -4,8 +4,9 @@
  * and self-referential tables reference earlier rows in the same batch.
  */
 
-import { Faker, en } from "@faker-js/faker";
+import { Faker, en, en_US } from "@faker-js/faker";
 import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.js";
+import { applyCoherence, planCoherence } from "./coherence.js";
 import { parseChecks } from "./checks.js";
 import { resolveDistribution, type Sampler } from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
@@ -110,8 +111,13 @@ export function* streamData(
   append?: AppendContext,
 ): IterableIterator<Batch> {
   const faker = new Faker({ locale: [en] });
+  // A separate en_US instance drives the intra-row coherence pass (US
+  // postcode-by-state data is absent from `en`). Keeping it off the main faker
+  // leaves every non-coherence column's seeded output byte-identical.
+  const cohFaker = new Faker({ locale: [en_US, en] });
   if (config.seed !== undefined) {
     faker.seed(config.seed);
+    cohFaker.seed(config.seed);
     // Date generators reference "now" by default; pin it so seeded runs are
     // fully reproducible.
     faker.setDefaultRefDate("2025-01-01T00:00:00.000Z");
@@ -168,9 +174,13 @@ export function* streamData(
     // limits (user-pinned via --column, or a partition key that must route to a
     // real partition).
     const tplan = planTemporal(table);
+    // Intra-row coherence plan (names/addresses that should agree). Only columns
+    // the generator owns are rewritten — `gens` excludes FK-driven columns.
+    const cplan = planCoherence(table);
     const partitionKeys = new Set(table.partition?.keyColumns ?? []);
     const frozen = (colName: string) =>
       partitionKeys.has(colName) || isOverridden(table, colName, config.columns);
+    const coherenceEligible = (colName: string) => gens.has(colName);
 
     const count = rowCount(table, config);
     // Full row history for this table, needed for self-referential FK draws and
@@ -211,6 +221,12 @@ export function* streamData(
         // parents it references and its own activity/expiry columns follow it.
         if (tplan) {
           applyTemporal(tplan, candidate, parentFloor(fkParents, createdColOf), window, faker, frozen);
+        }
+        // Make a row's names/addresses agree with each other before uniqueness is
+        // checked, so a coherent value (e.g. a unique email derived from the name)
+        // participates in the collision test.
+        if (cplan) {
+          applyCoherence(cplan, candidate, cohFaker, coherenceEligible, frozen);
         }
         // Check every unique constraint.
         const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join("\u0001"));

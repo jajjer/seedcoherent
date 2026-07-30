@@ -4,6 +4,26 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-07-29
+
+### Added
+
+- **Intra-row value coherence.** A row's name and address fields now agree with
+  each other instead of being drawn independently. When a table has both a
+  `first_name` and a `last_name`, its `full_name`/`display_name`, `email`, and
+  `username` are derived from that same name (so the email actually belongs to
+  the person), and a `gender`/`sex` column biases the first name. When a table
+  has both a `state` and a `zip`, the zip is a real postal code inside that state
+  and a `country` column reads `United States` — no more California zip codes in
+  Texas rows. Columns are grouped by name prefix, so `billing_*` and `shipping_*`
+  (or `contact_*`) blocks stay independent. A column pinned with `--column` still
+  anchors the rest of its group (a fixed `first_name` drives the derived email),
+  and foreign-key, partition-key, and intentionally-null columns are left
+  untouched. State values are emitted as their two-letter abbreviation (the form
+  that pairs with a zip). This changes seeded output for schemas with these
+  columns. Coherence draws come from a dedicated US locale, so every other
+  column's seeded output is byte-identical to before.
+
 ## [0.5.0] — 2026-07-29
 
 ### Added
