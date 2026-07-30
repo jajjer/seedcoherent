@@ -47,6 +47,11 @@ everything and inserts in dependency order inside a single transaction.
   keys reference the rows already there, and synthetic ids continue past the
   current max so nothing collides. "Add 5,000 orders to my existing users" is one
   flag.
+- **Temporally coherent.** Timestamps respect causality. A row's `updated_at`,
+  `last_login`, or `expires_at` never predates its `created_at`, and a child's
+  `created_at` never predates the parent it points at — so an order can't be
+  placed before its customer signed up. `--since` / `--until` bound the window,
+  so "all data from the last quarter" is two flags.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
 - **Preview before you write.** `--dry-run` prints the table order, row counts,
   and a few sample rows without touching the database. It works for subset +
@@ -83,6 +88,11 @@ npx seedcoherent $DATABASE_URL --rows users=100 --print
 
 # Deterministic output
 npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
+
+# Bound the time window — creation timestamps land in [since, until], and
+# children still never predate their parents
+npx seedcoherent $DATABASE_URL --rows users=1000 orders=5000 \
+  --since 2024-01-01 --until 2024-12-31
 
 # Skew a foreign key so a few parents get most of the children (power-law fan-out)
 npx seedcoherent $DATABASE_URL --rows users=1000 orders=20000 \

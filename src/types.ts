@@ -173,6 +173,14 @@ export interface Config {
   skip?: string[];
   /** RNG seed for deterministic output. */
   seed?: number;
+  /**
+   * Temporal coherence window (ISO date/timestamp). Creation timestamps are
+   * drawn within [since, until]; a child's creation time is never earlier than
+   * its parents'. Defaults: `until` is the seeded reference date (or now for an
+   * unseeded run) and `since` is two years before it.
+   */
+  since?: string;
+  until?: string;
   /** Rows per COPY batch / streaming-generation chunk. Does not affect output. */
   batchSize?: number;
   /**

@@ -4,6 +4,26 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-07-29
+
+### Added
+
+- **Temporal coherence.** Generated date/timestamp columns are now causal
+  instead of independent. A row's activity/expiry columns (`updated_at`,
+  `last_login`, `last_seen`, `modified_at`, `deleted_at`, `expires_at`) never
+  precede its creation column (`created_at`, `inserted_at`, `registered_at`,
+  `first_seen`), and a child row's creation time is never earlier than the
+  creation time of any parent it references by foreign key — so `orders.created_at`
+  always lands after the `users.created_at` of its user. Creation timestamps are
+  drawn inside a window controlled by the new `--since` / `--until` flags (ISO
+  dates; `until` defaults to the seeded reference date `2025-01-01`, or now for an
+  unseeded run, and `since` defaults to two years earlier). Expiry/deletion
+  columns may run past `until`, since those legitimately point at the future.
+  Works in append mode too: appended children reference the real creation times
+  of the existing parents they attach to. A column pinned with `--column` (or a
+  partition-key column) is left untouched. This changes seeded output for schemas
+  with date/timestamp columns.
+
 ## [0.4.0] — 2026-07-29
 
 ### Added

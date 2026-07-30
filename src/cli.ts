@@ -10,6 +10,7 @@ import { buildData, generateInto, type AppendContext, type TableStats } from "./
 import { topoSort } from "./graph.js";
 import { buildAppendPlan, buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
+import { temporalWindow } from "./temporal.js";
 import type { Config, TableInfo } from "./types.js";
 
 const program = new Command();
@@ -23,6 +24,8 @@ program
   .option("-r, --rows <spec...>", "rows per table, e.g. users=1000 orders=5000", [])
   .option("-d, --default-rows <n>", "default rows for tables not listed", (v) => parseInt(v, 10))
   .option("-s, --seed <n>", "RNG seed for deterministic output", (v) => parseInt(v, 10))
+  .option("--since <date>", "earliest creation timestamp (ISO date), e.g. 2023-01-01")
+  .option("--until <date>", "latest creation timestamp (ISO date); defaults to the seed reference date / now")
   .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) => parseInt(v, 10))
   .option(
     "--schema <name...>",
@@ -73,12 +76,22 @@ program
       columns: { ...fileConfig.columns, ...parseColumnSpecs(opts.column) },
       defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
       seed: opts.seed ?? fileConfig.seed,
+      since: opts.since ?? fileConfig.since,
+      until: opts.until ?? fileConfig.until,
       batchSize: opts.batchSize ?? fileConfig.batchSize,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
       distributions: { ...fileConfig.distributions, ...parseDistSpecs(opts.distribution) },
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
     };
+
+    // Validate the temporal window up front so a bad --since/--until fails
+    // before we connect (the dry-run plan path never reaches streamData).
+    try {
+      temporalWindow(config);
+    } catch (err) {
+      program.error(err instanceof Error ? err.message : String(err));
+    }
 
     const dialect = dialectFor(connStr);
     const schemas: string[] = opts.schema ?? dialect.defaultSchemas(connStr);
