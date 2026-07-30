@@ -4,6 +4,26 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-07-30
+
+### Added
+
+- **Weighted value distributions.** The `--distribution` flag — until now a
+  foreign-key-only knob for parent fan-out — also shapes a *categorical column's
+  own values*. `--distribution orders.status=weighted:paid=0.9,refunded=0.1`
+  gives explicit relative weights (they need not sum to 1), so 90% of orders come
+  out `paid`; `--distribution users.plan=zipf` applies a power-law over the
+  column's inferred label set (an enum's values, a `CHECK ... IN (...)` set, or a
+  `--column values:` list) in declared order, so the first label dominates and
+  the rest thin out. This replaces the dead-even split a uniform draw gives —
+  `GROUP BY status`, "mostly-active" cohorts, and top-N-by-category queries now
+  behave like production. A column is either a foreign key (fan-out) or a value
+  column (label spread), so the same flag reads naturally in both roles; a
+  `weighted:` spec on a foreign key degrades to uniform (parents have no labels).
+  The distribution machinery is shared with the FK path, and a value
+  distribution only reshapes columns you opt in — every other column's seeded
+  output is byte-identical to before.
+
 ## [0.7.0] — 2026-07-30
 
 ### Added

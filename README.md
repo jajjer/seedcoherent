@@ -42,6 +42,11 @@ everything and inserts in dependency order inside a single transaction.
   a `zipf` distribution and a few parents collect most of the children while the
   rest thin into a long tail — the lopsided shape real data has — so "top
   customers", pagination, and GROUP BY cardinalities behave like production.
+- **Lopsided categories, too.** The same `--distribution` knob shapes a
+  categorical column's own values — an enum, a `CHECK ... IN (...)` set, or a
+  `values:` list. Ask for `status=weighted:paid=0.9,refunded=0.1` and 90% of
+  orders come out `paid`; ask for `zipf` and the column skews toward its first
+  label — no more dead-even splits across states real data never has.
 - **Grows existing data, not just fresh schemas.** `--append` adds rows to a
   database that already has data: only the tables you name grow, their foreign
   keys reference the rows already there, and synthetic ids continue past the
@@ -104,6 +109,12 @@ npx seedcoherent $DATABASE_URL --rows users=1000 orders=5000 \
 npx seedcoherent $DATABASE_URL --rows users=1000 orders=20000 \
   --distribution orders.user_id=zipf
 
+# Skew a categorical column's values: explicit weights, or a power-law over its
+# labels (enum values / CHECK IN set / --column values: list)
+npx seedcoherent $DATABASE_URL --rows orders=20000 \
+  --distribution 'orders.status=weighted:paid=0.9,shipped=0.07,refunded=0.03' \
+  --distribution users.plan=zipf
+
 # Steer specific columns: a faker path, a fixed value, or a pick-list
 npx seedcoherent $DATABASE_URL --rows users=1000 \
   --column users.email=internet.email \
@@ -150,7 +161,7 @@ Sample rows:
 | `--batch-size <n>` | Rows per `COPY` batch (default: 10000; does not change output) |
 | `--schema <name...>` | Schema(s) to read (default: `public`) |
 | `--skip <table...>` | Tables to leave empty |
-| `--distribution <col=kind...>` | FK fan-out per child column, e.g. `orders.user_id=zipf` or `orders.user_id=zipf:2` (default: `uniform`) |
+| `--distribution <col=kind...>` | Skew a column: FK fan-out (`orders.user_id=zipf`, `…=zipf:2`) or a value column's labels (`orders.status=zipf`, `orders.status=weighted:paid=0.9,refunded=0.1`); default `uniform` |
 | `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
 | `-c, --config <path>` | Config file (see below) |
 | `-o, --out <file>` | Write SQL to a file instead of inserting |
@@ -282,7 +293,11 @@ generators or set counts. CLI flags win over the file.
   },
   "distributions": {
     "orders.user_id": "zipf",
-    "order_items.product_id": { "kind": "zipf", "skew": 2 }
+    "order_items.product_id": { "kind": "zipf", "skew": 2 },
+    "orders.status": { "kind": "weighted", "weights": [
+      { "value": "paid", "weight": 0.9 },
+      { "value": "refunded", "weight": 0.1 }
+    ] }
   },
   "anonymize": ["accounts.email"],
   "preserve": ["users.country"]
@@ -298,13 +313,17 @@ is a faker path (`users.email=internet.email`), `value:<x>` is a fixed value
 `value:`/`values:` tokens are JSON-coerced, so `value:30` is the number `30` and
 `value:true` is the boolean; anything that isn't valid JSON stays a string.
 
-`distributions` controls how children fan out across parents, keyed by the child
-FK column (same key forms as `columns`, and matching the `--distribution` flag).
-`"uniform"` (the default) spreads children evenly; `"zipf"` skews them into a
-power-law so a few parents dominate. `skew` is the Zipf exponent (default `1`,
-the classic harmonic law); raise it to concentrate harder, lower it toward
-uniform. Referential integrity is unchanged — every child still points at a real
-parent.
+`distributions` shapes how a column's values spread, keyed by column (same key
+forms as `columns`, and matching the `--distribution` flag). On a **foreign-key
+column** it controls how children fan out across parents; on a **categorical
+value column** (an enum, a `CHECK ... IN (...)` set, or a `values:` override) it
+controls how the labels are spread. `"uniform"` (the default) is even; `"zipf"`
+skews into a power-law so a few parents — or the first few labels, in declared
+order — dominate. `skew` is the Zipf exponent (default `1`, the classic harmonic
+law); raise it to concentrate harder, lower it toward uniform. `"weighted"`
+assigns explicit relative weights to named values (for a value column only — it
+carries its own labels, and is ignored on a foreign key). Referential integrity
+is unchanged — every child still points at a real parent.
 
 `anonymize` and `preserve` are subset-mode lists of columns to scrub or keep,
 matching the `--anonymize` / `--preserve` flags (which append to them).

@@ -34,7 +34,7 @@ program
   .option("--skip <table...>", "tables to leave empty", [])
   .option(
     "--distribution <spec...>",
-    "FK fan-out per child column, e.g. orders.user_id=zipf or orders.user_id=zipf:2 (default uniform)",
+    "skew a column: FK fan-out (orders.user_id=zipf), or a value column's labels (orders.status=zipf, orders.status=weighted:paid=0.9,refunded=0.1)",
     [],
   )
   .option(
