@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildData } from "../src/generate.js";
 import { topoSort } from "../src/graph.js";
-import { planCoherence } from "../src/coherence.js";
+import { planCoherence, STATE_CITIES } from "../src/coherence.js";
 import { col, idCol, schema, table } from "./helpers.js";
 import type { Config, Schema } from "../src/types.js";
 
@@ -138,6 +138,42 @@ test("state, zip and country describe the same US place", () => {
     assert.match(String(r.state), /^[A-Z]{2}$/, `state ${r.state} is not a 2-letter abbr`);
     assert.match(String(r.zip), /^\d{5}(-\d{4})?$/, `zip ${r.zip} malformed`);
     assert.equal(r.country, "United States");
+  }
+});
+
+test("the city sits in the row's own state", () => {
+  const s = schema(
+    table("addresses", {
+      columns: [idCol(), col("city"), col("state"), col("zip"), col("country")],
+      primaryKey: ["id"],
+    }),
+  );
+  const rows = rowsFor(build(s, { rows: { addresses: 300 }, seed: 6 }), "public.addresses");
+  let checked = 0;
+  for (const r of rows) {
+    const cities = STATE_CITIES[String(r.state)];
+    if (!cities) continue; // a territory we don't cover falls back to a generic city
+    assert.ok(
+      cities.includes(String(r.city)),
+      `city ${r.city} is not in state ${r.state}`,
+    );
+    checked++;
+  }
+  assert.ok(checked > rows.length / 2, "expected most rows to hit a covered state");
+});
+
+test("state + city cohere even without a zip column", () => {
+  const s = schema(
+    table("locations", {
+      columns: [idCol(), col("city"), col("state")],
+      primaryKey: ["id"],
+    }),
+  );
+  const rows = rowsFor(build(s, { rows: { locations: 200 }, seed: 12 }), "public.locations");
+  for (const r of rows) {
+    assert.match(String(r.state), /^[A-Z]{2}$/, `state ${r.state} is not a 2-letter abbr`);
+    const cities = STATE_CITIES[String(r.state)];
+    if (cities) assert.ok(cities.includes(String(r.city)), `city ${r.city} not in ${r.state}`);
   }
 });
 

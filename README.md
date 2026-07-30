@@ -54,9 +54,10 @@ everything and inserts in dependency order inside a single transaction.
   so "all data from the last quarter" is two flags.
 - **Coherent within a row.** Fields that describe the same thing agree. A row's
   `full_name`, `email`, and `username` all come from its own `first_name` +
-  `last_name` (and a `gender`/`sex` column steers the name), and a `zip` lands
-  inside its row's `state` with `country` set to match — no California ZIPs on
-  Texas rows. `billing_*` and `shipping_*` blocks are kept independent.
+  `last_name` (and a `gender`/`sex` column steers the name), and a `zip` and
+  `city` both land inside its row's `state` with `country` set to match — no
+  California ZIPs (or San Franciscos) on Texas rows. `billing_*` and `shipping_*`
+  blocks are kept independent.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
 - **Preview before you write.** `--dry-run` prints the table order, row counts,
   and a few sample rows without touching the database. It works for subset +
