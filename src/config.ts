@@ -47,33 +47,61 @@ export function parseRowSpecs(specs: string[]): Record<string, number> {
 }
 
 /**
- * Parse repeated `column=kind[:skew]` CLI flags into a distributions map, e.g.
- * `orders.user_id=zipf` or `orders.user_id=zipf:2`. `uniform` and `zipf` are the
- * recognized kinds; only `zipf` accepts an optional skew factor.
+ * Parse repeated `column=kind[:arg]` CLI flags into a distributions map. The
+ * recognized kinds are:
+ *   - `uniform` — even spread (the default); takes no argument.
+ *   - `zipf[:skew]` — power-law over the choices in declared order; optional
+ *     skew factor (`zipf:2` concentrates harder).
+ *   - `weighted:v1=w1,v2=w2,...` — explicit relative weights per value, for a
+ *     categorical value column, e.g. `orders.status=weighted:paid=0.9,refunded=0.1`.
+ *     Weights need not sum to 1; values are JSON-coerced (so `1=…`,`true=…` land
+ *     as a number/boolean), else kept as the raw string.
  */
 export function parseDistSpecs(specs: string[]): Record<string, DistSpec> {
   const out: Record<string, DistSpec> = {};
   for (const spec of specs) {
-    const eq = spec.lastIndexOf("=");
+    const eq = spec.indexOf("=");
     if (eq === -1) throw new Error(`Invalid --distribution spec "${spec}" (expected column=kind)`);
     const column = spec.slice(0, eq).trim();
-    const [kind, skewStr] = spec.slice(eq + 1).split(":");
+    const rhs = spec.slice(eq + 1);
+    // Split off the kind; `weighted:` keeps its whole `v=w,...` body as the arg.
+    const colon = rhs.indexOf(":");
+    const kind = colon === -1 ? rhs : rhs.slice(0, colon);
+    const arg = colon === -1 ? undefined : rhs.slice(colon + 1);
     if (kind === "uniform") {
-      if (skewStr !== undefined) throw new Error(`uniform takes no skew in "${spec}"`);
+      if (arg !== undefined) throw new Error(`uniform takes no argument in "${spec}"`);
       out[column] = "uniform";
     } else if (kind === "zipf") {
-      if (skewStr === undefined) {
+      if (arg === undefined) {
         out[column] = "zipf";
       } else {
-        const skew = Number(skewStr);
+        const skew = Number(arg);
         if (!Number.isFinite(skew) || skew <= 0) throw new Error(`Invalid skew in "${spec}" (need > 0)`);
         out[column] = { kind: "zipf", skew };
       }
+    } else if (kind === "weighted") {
+      out[column] = { kind: "weighted", weights: parseWeights(arg, spec) };
     } else {
-      throw new Error(`Unknown distribution "${kind}" in "${spec}" (use uniform or zipf)`);
+      throw new Error(`Unknown distribution "${kind}" in "${spec}" (use uniform, zipf, or weighted)`);
     }
   }
   return out;
+}
+
+/** Parse a `weighted:` body — `v1=w1,v2=w2,...` — into value/weight pairs. */
+function parseWeights(body: string | undefined, spec: string): Array<{ value: unknown; weight: number }> {
+  if (!body) throw new Error(`weighted needs value=weight pairs in "${spec}" (e.g. weighted:a=0.9,b=0.1)`);
+  const pairs = body.split(",").map((s) => s.trim()).filter(Boolean);
+  if (pairs.length === 0) throw new Error(`Empty weights in "${spec}" (expected weighted:a=0.9,b=0.1)`);
+  const weights = pairs.map((pair) => {
+    const eq = pair.lastIndexOf("=");
+    if (eq === -1) throw new Error(`Invalid weight "${pair}" in "${spec}" (expected value=weight)`);
+    const value = coerceLiteral(pair.slice(0, eq).trim());
+    const weight = Number(pair.slice(eq + 1));
+    if (!Number.isFinite(weight) || weight <= 0) throw new Error(`Invalid weight for "${pair}" in "${spec}" (need > 0)`);
+    return { value, weight };
+  });
+  return weights;
 }
 
 /** Coerce a CLI literal token to JSON if it parses (numbers, booleans, null), else keep the raw string. */

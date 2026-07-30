@@ -134,19 +134,30 @@ export interface Schema {
 }
 
 /**
- * How child rows choose their parent across a foreign key. `uniform` (the
- * default) picks any parent with equal probability; `zipf` skews the choice so a
- * few parents collect many children and most collect few — the power-law shape
- * real relational data usually has. `skew` tunes the concentration: it is the
- * Zipf exponent, so parent rank `k` gets weight `1/k**skew`. Default 1 (classic
- * harmonic Zipf); higher values concentrate harder, lower values flatten toward
- * uniform.
+ * How draws spread across a set of choices. Used in two roles that share the
+ * same "lopsidedness" idea:
+ *
+ *  - **Foreign keys** — how child rows choose their parent. `uniform` (the
+ *    default) picks any parent equally; `zipf` skews the choice so a few parents
+ *    collect many children and most collect few.
+ *  - **Value columns** — how a categorical column spreads over its labels (an
+ *    enum's values, a `CHECK ... IN (...)` set, or a `values:` override). Real
+ *    `status`/`plan`/`tier` columns are lopsided too — mostly `active`, a sliver
+ *    `banned` — not the even split a uniform draw gives.
+ *
+ * `zipf` weights choice `k` (1-based, in declared order) by `1/k**skew`. `skew`
+ * defaults to 1 (classic harmonic Zipf); higher concentrates harder, lower
+ * flattens toward uniform. `weighted` assigns explicit relative weights to named
+ * values — it carries its own value set, so it applies to any column regardless
+ * of type and is ignored on foreign keys (parents have no labels). Weights are
+ * relative and need not sum to 1.
  */
 export type DistSpec =
   | "uniform"
   | "zipf"
   | { kind: "uniform" }
-  | { kind: "zipf"; skew?: number };
+  | { kind: "zipf"; skew?: number }
+  | { kind: "weighted"; weights: Array<{ value: unknown; weight: number }> };
 
 /** Per-column override supplied by the user via config. */
 export type ColumnOverride =
@@ -163,10 +174,12 @@ export interface Config {
   /** Per-column generator overrides: { "users.email": "internet.email" }. */
   columns?: Record<string, ColumnOverride>;
   /**
-   * Per-foreign-key parent-selection distributions, keyed by the child column:
-   * { "orders.user_id": "zipf" }. Controls how many children each parent row
-   * collects. Defaults to `uniform` for any FK not listed. Keyed by
-   * "table.column", "schema.table.column", or bare "column".
+   * Per-column distributions, keyed by column. On a foreign-key column it shapes
+   * parent selection ({ "orders.user_id": "zipf" } — how many children each
+   * parent collects); on a categorical value column it shapes the label spread
+   * ({ "orders.status": "weighted:..." } — mostly `paid`, a few `refunded`).
+   * Defaults to `uniform` for anything not listed. Keyed by "table.column",
+   * "schema.table.column", or bare "column".
    */
   distributions?: Record<string, DistSpec>;
   /** Tables to skip entirely. */

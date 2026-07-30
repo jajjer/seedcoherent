@@ -8,7 +8,7 @@ import { Faker, en, en_US } from "@faker-js/faker";
 import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.js";
 import { applyCoherence, planCoherence } from "./coherence.js";
 import { parseChecks } from "./checks.js";
-import { resolveDistribution, type Sampler } from "./distribution.js";
+import { resolveDistribution, resolveValueSpec, type Sampler } from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
 import {
   applyTemporal,
@@ -154,7 +154,13 @@ export function* streamData(
         // A partition-key column must stay inside an existing partition, else the
         // parent-table insert has nowhere to route the row.
         const partGen = table.partition ? partitionKeyGenerator(col, table.partition) : null;
-        gens.set(col.name, partGen ?? inferGenerator(table, col, config.columns, checks.get(col.name)));
+        // A configured value distribution (non-FK columns only — FK columns take
+        // the parent-selection path above) reshapes a categorical column's labels.
+        const dist = resolveValueSpec(table, col.name, config.distributions);
+        gens.set(
+          col.name,
+          partGen ?? inferGenerator(table, col, config.columns, checks.get(col.name), dist),
+        );
       }
     }
     // Bind a parent-selection sampler per cross-table FK. Topological order means

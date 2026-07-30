@@ -5,10 +5,12 @@
  */
 
 import { Faker } from "@faker-js/faker";
+import { valueSampler } from "./distribution.js";
 import type {
   ColumnCheck,
   ColumnInfo,
   ColumnOverride,
+  DistSpec,
   PartitionInfo,
   TableInfo,
   TypeRef,
@@ -260,15 +262,55 @@ export function inferGenerator(
   col: ColumnInfo,
   overrides: Record<string, ColumnOverride> = {},
   check?: ColumnCheck,
+  dist?: DistSpec,
 ): Generator {
   const qualified = overrides[`${table.name}.${col.name}`] ?? overrides[`${table.key}.${col.name}`];
   const bare = overrides[col.name];
+  const override = qualified ?? bare;
+
+  // A configured value distribution reshapes how a categorical column spreads
+  // over its labels. It only runs when the user opted this column in; otherwise
+  // the original path below is untouched, so seeded output stays byte-identical.
+  if (dist !== undefined) {
+    const weighted = distributedValueGenerator(col, check, override, dist);
+    if (weighted) return weighted;
+  }
+
   // An explicit override is the user's stated intent — respect it verbatim.
-  if (qualified) return overrideToGenerator(qualified);
-  if (bare) return overrideToGenerator(bare);
+  if (override) return overrideToGenerator(override);
 
   const base = baseGenerator(table, col);
   return check ? applyCheck(base, col, check) : base;
+}
+
+/**
+ * Build a distribution-shaped generator for a categorical column, or `null` when
+ * there is no label set to weight (so the caller keeps the ordinary generator).
+ * The value set is taken, in precedence order, from: a `weighted:` spec's own
+ * values; a `values:` override; an enum column's labels; a `CHECK col IN (...)`
+ * membership set. Uniform specs yield `null` too — the even-spread generator is
+ * already what an unshaped column uses.
+ */
+function distributedValueGenerator(
+  col: ColumnInfo,
+  check: ColumnCheck | undefined,
+  override: ColumnOverride | undefined,
+  dist: DistSpec,
+): Generator | null {
+  const weighted = typeof dist === "object" && dist.kind === "weighted";
+  let values: unknown[] | null = null;
+  if (weighted) {
+    values = []; // valueSampler supplies its own values for the weighted spec
+  } else if (override && typeof override === "object" && "values" in override) {
+    values = override.values;
+  } else if (col.dataType === "enum" && col.enumValues) {
+    values = col.enumValues;
+  } else if (check?.in && check.in.length > 0) {
+    values = check.in;
+  }
+  if (values === null) return null;
+  const sampler = valueSampler(values, dist);
+  return sampler ? (f) => sampler(f) : null;
 }
 
 /** Name/type generator selection, before any CHECK constraint is applied. */
