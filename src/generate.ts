@@ -9,7 +9,15 @@ import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.j
 import { parseChecks } from "./checks.js";
 import { resolveDistribution, type Sampler } from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
-import type { Config, ColumnInfo, ForeignKey, Schema, TableInfo } from "./types.js";
+import {
+  applyTemporal,
+  createdColumn,
+  planTemporal,
+  temporalWindow,
+  timestampMs,
+  type TemporalPlan,
+} from "./temporal.js";
+import type { Config, ColumnInfo, ColumnOverride, ForeignKey, Schema, TableInfo } from "./types.js";
 
 export type Row = Record<string, unknown>;
 
@@ -115,6 +123,15 @@ export function* streamData(
   // children can reference existing parents.
   if (append) for (const [key, rows] of append.existing) generated.set(key, rows);
 
+  // Temporal coherence: the causal window plus each table's creation column, so
+  // a child's creation time can be floored at its parents'.
+  const window = temporalWindow(config);
+  const createdColOf = new Map<string, string>();
+  for (const table of order) {
+    const c = createdColumn(table);
+    if (c) createdColOf.set(table.key, c);
+  }
+
   for (const table of order) {
     if (skip.has(table.name) || skip.has(table.key)) continue;
     // Append mode only generates the tables the user asked for; every other
@@ -146,6 +163,14 @@ export function* streamData(
       const dist = resolveDistribution(table, fk.columns, config.distributions);
       fkSamplers.set(fk, dist.bind(parents));
     }
+
+    // Temporal coherence plan for this table, plus which of its columns are off
+    // limits (user-pinned via --column, or a partition key that must route to a
+    // real partition).
+    const tplan = planTemporal(table);
+    const partitionKeys = new Set(table.partition?.keyColumns ?? []);
+    const frozen = (colName: string) =>
+      partitionKeys.has(colName) || isOverridden(table, colName, config.columns);
 
     const count = rowCount(table, config);
     // Full row history for this table, needed for self-referential FK draws and
@@ -181,6 +206,11 @@ export function* streamData(
             i,
             () => idCounter,
           );
+        }
+        // Rewrite date/timestamp columns so this row's creation time follows the
+        // parents it references and its own activity/expiry columns follow it.
+        if (tplan) {
+          applyTemporal(tplan, candidate, parentFloor(fkParents, createdColOf), window, faker, frozen);
         }
         // Check every unique constraint.
         const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join("\u0001"));
@@ -293,6 +323,39 @@ export function usesSyntheticId(table: TableInfo): boolean {
   if (table.primaryKey.length !== 1) return false;
   const col = table.columns.find((c) => c.name === table.primaryKey[0]);
   return !!col && (col.isIdentity || col.hasDefault) && col.dataType === "integer";
+}
+
+/**
+ * Latest creation time among the parents this row references, or null when none
+ * of them carry a creation column. Self-referential FKs are excluded (they are
+ * resolved inline and never enter `fkParents`).
+ */
+function parentFloor(
+  fkParents: Map<ForeignKey, Row | null>,
+  createdColOf: Map<string, string>,
+): number | null {
+  let floor: number | null = null;
+  for (const [fk, parent] of fkParents) {
+    if (!parent) continue;
+    const col = createdColOf.get(fk.refTable);
+    if (!col) continue;
+    const ms = timestampMs(parent[col]);
+    if (ms !== null) floor = floor === null ? ms : Math.max(floor, ms);
+  }
+  return floor;
+}
+
+/** Has the user pinned this column via a --column / config override? Mirrors inferGenerator's key forms. */
+function isOverridden(
+  table: TableInfo,
+  colName: string,
+  overrides: Record<string, ColumnOverride> = {},
+): boolean {
+  return (
+    overrides[`${table.name}.${colName}`] !== undefined ||
+    overrides[`${table.key}.${colName}`] !== undefined ||
+    overrides[colName] !== undefined
+  );
 }
 
 function valueForColumn(
