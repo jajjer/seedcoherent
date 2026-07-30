@@ -44,7 +44,7 @@ Enter
 Type "# Orders reference REAL users. Emails, countries, enums all look right."
 Sleep 1200ms
 Enter
-Type@30ms "sqlite3 -header -column /tmp/shop.db \"SELECT o.id, u.email, u.country, o.status FROM orders o JOIN users u ON u.id = o.user_id LIMIT 5;\""
+Type@30ms `sqlite3 -header -column /tmp/shop.db "SELECT o.id, u.email, u.country, o.status FROM orders o JOIN users u ON u.id = o.user_id LIMIT 5;"`
 Sleep 500ms
 Enter
 Sleep 3s
@@ -53,7 +53,7 @@ Enter
 Type "# Zero orphan rows — every foreign key points at a row that exists."
 Sleep 1200ms
 Enter
-Type@30ms "sqlite3 /tmp/shop.db \"SELECT count(*) AS orphans FROM orders WHERE user_id NOT IN (SELECT id FROM users);\""
+Type@30ms `sqlite3 /tmp/shop.db "SELECT count(*) AS orphans FROM orders WHERE user_id NOT IN (SELECT id FROM users);"`
 Sleep 500ms
 Enter
 Sleep 3s
