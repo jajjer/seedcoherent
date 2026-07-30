@@ -4,6 +4,28 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-07-30
+
+### Added
+
+- **City coherence.** A row's `city` now sits inside its own `state`, completing
+  the address block started in 0.6.0. When a table has a `state` alongside a
+  `city` (and/or a `zip`), the city is drawn from a curated set of real cities in
+  that state — so a Texas row gets Houston or Austin, never San Francisco — with
+  `country` still reading `United States`. Address coherence now triggers on a
+  `state` plus *either* a `zip` or a `city`, so a `city`/`state` pair with no zip
+  column coheres too. `billing_*` and `shipping_*` blocks stay independent, pinned
+  columns still anchor their group, and Faker's own (state-unaware) city data is
+  the fallback for the rare uncovered territory. This changes seeded output only
+  for schemas with a city (or newly a zip-less state) column; every other schema's
+  output is byte-identical to before.
+- **MySQL integration test + CI.** A live MySQL end-to-end test (opt-in via
+  `MYSQL_URL`) now exercises the full introspect → generate → insert pipeline and
+  verifies referential integrity, uniqueness, and the MySQL-specific column shapes
+  (`AUTO_INCREMENT`, `ENUM`, `tinyint(1)` booleans, `JSON`, `CHECK`). CI spins up a
+  `mysql:8` service and runs it alongside the existing Postgres integration suite,
+  so MySQL is no longer covered only by off-database unit tests.
+
 ## [0.6.0] — 2026-07-29
 
 ### Added

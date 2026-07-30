@@ -10,8 +10,8 @@
  *   - `full_name`/`display_name`, `email`, and `username` all derive from the
  *     same `first_name` + `last_name` (and the first name respects a `gender`/
  *     `sex` column when present), and
- *   - `state`, `zip`, and `country` describe the same place — a zip that
- *     actually falls in its state, in the US.
+ *   - `state`, `zip`, `city`, and `country` describe the same place — a zip that
+ *     actually falls in its state and a city that really sits in it, in the US.
  *
  * Like temporal coherence, it runs as a post-pass over an already-generated row.
  * Draws come from a dedicated en_US Faker instance (US postcode-by-state data is
@@ -33,6 +33,7 @@ type Role =
   | "sex"
   | "state"
   | "zip"
+  | "city"
   | "country";
 
 /** Columns of one entity (shared prefix), indexed by role — a role may repeat. */
@@ -68,13 +69,14 @@ const ROLE_TOKENS = new Set([
   "gender", "sex",
   "state", "province", "region",
   "zip", "zipcode", "postal", "postalcode", "postcode", "code",
+  "city", "town", "municipality",
   "country", "nation",
   "address", "addr",
 ]);
 
 /** Roles whose value we overwrite; each must land in a text-typed column. */
 const WRITE_ROLES: ReadonlySet<Role> = new Set<Role>([
-  "first", "last", "full", "email", "username", "state", "zip", "country",
+  "first", "last", "full", "email", "username", "state", "zip", "city", "country",
 ]);
 
 interface MatchCtx {
@@ -118,6 +120,7 @@ function roleOf({ n, tokens }: MatchCtx): Role | null {
   if (tok(tokens, "gender", "sex")) return "sex";
   if (tok(tokens, "state", "province", "region")) return "state";
   if (has(n, "zipcode", "postalcode", "postcode") || tok(tokens, "zip")) return "zip";
+  if (tok(tokens, "city", "town", "municipality")) return "city";
   if (tok(tokens, "country")) return "country";
   return null;
 }
@@ -127,17 +130,21 @@ function hasName(g: Group): boolean {
   return g.has("first") && g.has("last");
 }
 
-/** Does this group have enough columns for address coherence (a state AND a zip)? */
+/**
+ * Does this group have enough columns for address coherence? A state anchors the
+ * place, so it's required, plus at least one field to make agree with it — a zip
+ * (a real code inside the state) or a city (a real city that sits in it).
+ */
 function hasAddress(g: Group): boolean {
-  return g.has("state") && g.has("zip");
+  return g.has("state") && (g.has("zip") || g.has("city"));
 }
 
 /**
  * Build a table's coherence plan, or null when nothing coheres. Columns are
  * grouped by entity prefix; a group is kept only if it can actually enforce name
- * coherence (needs both a first and last name) or address coherence (needs both a
- * state and a zip) — a lone `email` or `zip` has nothing to agree with and is
- * left to the ordinary generator.
+ * coherence (needs both a first and last name) or address coherence (needs a
+ * state plus a zip or a city) — a lone `email` or `zip` has nothing to agree with
+ * and is left to the ordinary generator.
  */
 export function planCoherence(table: TableInfo): CoherencePlan | null {
   const byPrefix = new Map<string, Group>();
@@ -214,9 +221,13 @@ export function applyCoherence(
     }
 
     if (hasAddress(g)) {
+      // Draw the state first — it anchors the place — then the zip and city that
+      // sit inside it. Ordering matters for determinism: city is drawn last so a
+      // schema that gains a city column keeps its existing state/zip output.
       const abbr = f.location.state({ abbreviated: true });
       writeAll(g.get("state"), () => abbr);
       writeAll(g.get("zip"), () => zipForState(f, abbr));
+      writeAll(g.get("city"), () => cityForState(f, abbr));
       writeAll(g.get("country"), () => "United States");
     }
   }
@@ -230,3 +241,74 @@ function zipForState(f: Faker, stateAbbr: string): string {
     return f.location.zipCode();
   }
 }
+
+/**
+ * A real city that sits in `stateAbbr`. Faker's `location.city()` invents plausible
+ * names untied to any state (it ignores a `{ state }` option), so a curated list of
+ * well-known cities per state is what keeps the city coherent with its state. Falls
+ * back to a generic Faker city if the abbreviation isn't one we cover (e.g. a US
+ * territory), which is rare and still constraint-valid.
+ */
+function cityForState(f: Faker, stateAbbr: string): string {
+  const cities = STATE_CITIES[stateAbbr];
+  return cities ? f.helpers.arrayElement(cities) : f.location.city();
+}
+
+/**
+ * Well-known real cities per US state (and DC), keyed by two-letter abbreviation to
+ * match `location.state({ abbreviated: true })`. A handful each is enough for
+ * variety; every entry genuinely sits in its state so `state`/`city` always agree.
+ */
+export const STATE_CITIES: Record<string, string[]> = {
+  AL: ["Birmingham", "Montgomery", "Huntsville", "Mobile"],
+  AK: ["Anchorage", "Fairbanks", "Juneau"],
+  AZ: ["Phoenix", "Tucson", "Mesa", "Scottsdale"],
+  AR: ["Little Rock", "Fayetteville", "Fort Smith"],
+  CA: ["Los Angeles", "San Francisco", "San Diego", "Sacramento", "San Jose"],
+  CO: ["Denver", "Colorado Springs", "Boulder", "Aurora"],
+  CT: ["Hartford", "New Haven", "Stamford", "Bridgeport"],
+  DE: ["Wilmington", "Dover", "Newark"],
+  DC: ["Washington"],
+  FL: ["Miami", "Orlando", "Tampa", "Jacksonville", "Tallahassee"],
+  GA: ["Atlanta", "Savannah", "Augusta", "Athens"],
+  HI: ["Honolulu", "Hilo", "Kailua"],
+  ID: ["Boise", "Nampa", "Idaho Falls"],
+  IL: ["Chicago", "Springfield", "Naperville", "Peoria"],
+  IN: ["Indianapolis", "Fort Wayne", "Evansville", "Bloomington"],
+  IA: ["Des Moines", "Cedar Rapids", "Davenport"],
+  KS: ["Wichita", "Overland Park", "Topeka"],
+  KY: ["Louisville", "Lexington", "Bowling Green"],
+  LA: ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"],
+  ME: ["Portland", "Augusta", "Bangor"],
+  MD: ["Baltimore", "Annapolis", "Rockville", "Frederick"],
+  MA: ["Boston", "Worcester", "Cambridge", "Springfield"],
+  MI: ["Detroit", "Grand Rapids", "Ann Arbor", "Lansing"],
+  MN: ["Minneapolis", "Saint Paul", "Rochester", "Duluth"],
+  MS: ["Jackson", "Gulfport", "Biloxi"],
+  MO: ["Kansas City", "St. Louis", "Springfield", "Columbia"],
+  MT: ["Billings", "Missoula", "Bozeman", "Helena"],
+  NE: ["Omaha", "Lincoln", "Bellevue"],
+  NV: ["Las Vegas", "Reno", "Henderson", "Carson City"],
+  NH: ["Manchester", "Nashua", "Concord"],
+  NJ: ["Newark", "Jersey City", "Trenton", "Princeton"],
+  NM: ["Albuquerque", "Santa Fe", "Las Cruces"],
+  NY: ["New York", "Buffalo", "Rochester", "Albany", "Syracuse"],
+  NC: ["Charlotte", "Raleigh", "Durham", "Greensboro", "Asheville"],
+  ND: ["Fargo", "Bismarck", "Grand Forks"],
+  OH: ["Columbus", "Cleveland", "Cincinnati", "Toledo", "Dayton"],
+  OK: ["Oklahoma City", "Tulsa", "Norman"],
+  OR: ["Portland", "Salem", "Eugene", "Bend"],
+  PA: ["Philadelphia", "Pittsburgh", "Harrisburg", "Allentown"],
+  RI: ["Providence", "Warwick", "Newport"],
+  SC: ["Columbia", "Charleston", "Greenville"],
+  SD: ["Sioux Falls", "Rapid City", "Pierre"],
+  TN: ["Nashville", "Memphis", "Knoxville", "Chattanooga"],
+  TX: ["Houston", "Dallas", "Austin", "San Antonio", "Fort Worth"],
+  UT: ["Salt Lake City", "Provo", "Ogden", "St. George"],
+  VT: ["Burlington", "Montpelier", "Rutland"],
+  VA: ["Virginia Beach", "Richmond", "Norfolk", "Arlington", "Alexandria"],
+  WA: ["Seattle", "Spokane", "Tacoma", "Olympia", "Bellevue"],
+  WV: ["Charleston", "Huntington", "Morgantown"],
+  WI: ["Milwaukee", "Madison", "Green Bay"],
+  WY: ["Cheyenne", "Casper", "Laramie"],
+};

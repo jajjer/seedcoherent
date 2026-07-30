@@ -23,6 +23,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        # Wait until MySQL is accepting connections before the job starts.
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +49,10 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # DATABASE_URL is set, so the opt-in integration tests run too.
+      # Both DATABASE_URL and MYSQL_URL are set, so the opt-in Postgres and
+      # MySQL integration tests run too.
       - name: Test
         run: npm test
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          MYSQL_URL: mysql://root:root@127.0.0.1:3306/
