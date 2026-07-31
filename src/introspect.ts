@@ -51,7 +51,11 @@ export function categorize(udtName: string, enumValues: string[] | null): string
     case "name":
       return "text";
     default:
-      return "text";
+      // A type we don't know how to generate a valid literal for (money,
+      // interval, tsvector, PostGIS geometry, macaddr, bit, xml, …). Marking it
+      // "unsupported" — rather than guessing "text" and emitting lorem that the
+      // INSERT rejects — lets generation NULL/skip it or fail with a clear message.
+      return "unsupported";
   }
 }
 

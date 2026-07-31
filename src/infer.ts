@@ -158,6 +158,11 @@ function generatorForType(col: ColumnInfo): Generator {
       return compositeGenerator(col.compositeFields ?? []);
     case "range":
       return rangeGenerator(col.rangeSubtype);
+    case "unsupported":
+      // No safe literal for this type. Emit NULL — valid for nullable columns;
+      // NOT NULL ones without a default/override are rejected up front by
+      // requiredUnsupportedColumns before any rows are written.
+      return () => null;
     case "text":
     default:
       return (f) => {

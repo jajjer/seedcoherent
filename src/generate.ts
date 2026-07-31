@@ -96,6 +96,60 @@ function isDbAssigned(col: ColumnInfo): boolean {
 }
 
 /**
+ * Should this column appear in the INSERT at all? We drop DB-assigned columns,
+ * and also drop an unsupported-type column that carries a DB default and hasn't
+ * been overridden — leaving it out lets the database supply a valid default we
+ * can't synthesize (money, interval, geometry, …), instead of inserting NULL.
+ */
+function emitsColumn(table: TableInfo, col: ColumnInfo, config: Config): boolean {
+  if (isDbAssigned(col)) return false;
+  if (
+    col.dataType === "unsupported" &&
+    (col.hasDefault || col.isIdentity) &&
+    !isOverridden(table, col.name, config.columns)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Columns of a type we can't generate for and can't skip. */
+export interface UnsupportedColumn {
+  /** Owning table's `schema.table` key. */
+  table: string;
+  column: string;
+  /** The raw type name, for the error message. */
+  udtName: string;
+}
+
+/**
+ * Finds NOT NULL columns of an unsupported type that we can neither generate a
+ * valid value for nor safely omit: no DB default, no user override, and not
+ * served by a foreign key (whose value would come from a parent row). Inserting
+ * these would fail, so the CLI reports them up front. Only the tables in
+ * `tableKeys` (the ones a run will actually generate) are inspected.
+ */
+export function requiredUnsupportedColumns(
+  schema: Schema,
+  config: Config,
+  tableKeys: Iterable<string>,
+): UnsupportedColumn[] {
+  const out: UnsupportedColumn[] = [];
+  for (const key of tableKeys) {
+    const table = schema.tables.get(key);
+    if (!table) continue;
+    for (const col of table.columns) {
+      if (col.dataType !== "unsupported") continue;
+      if (col.nullable || col.hasDefault || col.isIdentity || col.isGenerated) continue;
+      if (isOverridden(table, col.name, config.columns)) continue;
+      if (fkForColumn(table, col.name)) continue;
+      out.push({ table: table.key, column: col.name, udtName: col.udtName });
+    }
+  }
+  return out;
+}
+
+/**
  * Generates rows table-by-table in dependency order, yielding them in batches
  * of at most `batchSize`. Exactly one batch per non-skipped table is flagged
  * `last` (possibly empty), so consumers can bracket each table even when it
@@ -144,7 +198,7 @@ export function* streamData(
     // table just lends its existing pool (seeded above) and emits nothing.
     if (append && !append.generate.has(table.key)) continue;
 
-    const emitCols = table.columns.filter((c) => !isDbAssigned(c));
+    const emitCols = table.columns.filter((c) => emitsColumn(table, c, config));
     // Distill CHECK constraints into per-column bounds the generators honor.
     const checks = parseChecks(table.checks);
     // Pre-resolve a generator per non-FK column.
