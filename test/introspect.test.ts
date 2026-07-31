@@ -51,6 +51,8 @@ test("text-like types collapse to text", () => {
   }
 });
 
-test("unknown types fall back to text", () => {
-  assert.equal(categorize("some_custom_domain", null), "text");
+test("unknown types are flagged unsupported, not guessed as text", () => {
+  assert.equal(categorize("some_custom_domain", null), "unsupported");
+  assert.equal(categorize("tsvector", null), "unsupported");
+  assert.equal(categorize("money", null), "unsupported");
 });

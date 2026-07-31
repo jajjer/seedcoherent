@@ -45,7 +45,7 @@ test("binary/text/json families", () => {
     assert.equal(cat(t), "text");
   }
   assert.equal(cat("json"), "json");
-  assert.equal(cat("geometry"), "text"); // unknown -> text
+  assert.equal(cat("geometry"), "unsupported"); // spatial -> unsupported, not guessed
 });
 
 test("enum labels win over the base type", () => {

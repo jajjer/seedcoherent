@@ -4,6 +4,22 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-07-30
+
+### Fixed
+
+- **Unsupported column types no longer crash the whole run.** A type the
+  generator doesn't recognize (`money`, `interval`, `tsvector`, PostGIS
+  `geometry`, `macaddr`, `bit`, `xml`, spatial types, …) was silently treated as
+  `text` and filled with lorem words the `INSERT` rejects — rolling back the
+  entire transaction to zero rows with a raw database error. Such types are now
+  categorized `unsupported` and handled safely per column: a nullable one gets
+  `NULL`, one with a DB default is left out of the `INSERT` so the database fills
+  it, and a `--column` override is honored as before. A `NOT NULL` column with no
+  default, override, or foreign key to draw from is reported **up front** — with
+  the exact `--column` flag to fix it — instead of failing mid-transaction.
+  Applies to Postgres and MySQL; SQLite is dynamically typed and was unaffected.
+
 ## [0.8.0] — 2026-07-30
 
 ### Added

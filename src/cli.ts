@@ -6,7 +6,14 @@ import { Command } from "commander";
 import { loadConfig, parseColumnSpecs, parseDistSpecs, parseRowSpecs } from "./config.js";
 import { dialectFor } from "./dialect.js";
 import { appendTargets, planAppend } from "./append.js";
-import { buildData, generateInto, type AppendContext, type TableStats } from "./generate.js";
+import {
+  buildData,
+  generateInto,
+  requiredUnsupportedColumns,
+  rowCount,
+  type AppendContext,
+  type TableStats,
+} from "./generate.js";
 import { topoSort } from "./graph.js";
 import { buildAppendPlan, buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
@@ -119,6 +126,34 @@ program
           program.error("--append needs at least one table to grow: pass --rows <table>=<n>.");
         }
         appendCtx = await planAppend(schema, order, config, dialect.createRowFetcher(client));
+      }
+
+      // Some column types have no safe generated literal. If a NOT NULL column
+      // of such a type has no default/override and no FK to draw from, the INSERT
+      // would fail mid-transaction — report it up front instead. Subset mode
+      // passes real values through verbatim, so it's exempt.
+      if (!isSubset) {
+        const skipSet = new Set(config.skip ?? []);
+        const genKeys = isAppend
+          ? [...appendCtx!.generate]
+          : order
+              .filter((t) => !skipSet.has(t.name) && !skipSet.has(t.key) && rowCount(t, config) > 0)
+              .map((t) => t.key);
+        const unsupported = requiredUnsupportedColumns(schema, config, genKeys);
+        if (unsupported.length > 0) {
+          const lines = unsupported.map((c) => `  ${c.table}.${c.column} (${c.udtName})`);
+          const first = unsupported[0];
+          program.error(
+            [
+              `Can't generate a value for ${unsupported.length} NOT NULL column(s) of an unsupported type:`,
+              ...lines,
+              "",
+              "Provide a value and re-run — e.g.:",
+              `  --column ${first.table}.${first.column}=value:<literal>`,
+              "(a faker path or values:a,b,c work too), or make the column nullable / give it a DB default.",
+            ].join("\n"),
+          );
+        }
       }
 
       const batchSize: number | undefined = config.batchSize;

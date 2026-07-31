@@ -60,7 +60,10 @@ export function categorizeMysql(
     case "set":
       return "text";
     default:
-      return "text";
+      // Spatial (geometry/point/…) and other types we can't emit a valid literal
+      // for. Flag them "unsupported" so generation NULLs/skips or errors clearly,
+      // instead of inserting lorem text the column rejects.
+      return "unsupported";
   }
 }
 
