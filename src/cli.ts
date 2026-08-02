@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /** seedcoherent — schema-aware synthetic data generator for Postgres, MySQL, and SQLite. */
 
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { loadConfig, parseColumnSpecs, parseDistSpecs, parseRowSpecs } from "./config.js";
-import { dialectFor } from "./dialect.js";
+import { dialectByName, dialectFor, type DialectName } from "./dialect.js";
+import { loadSchemaFromDdl } from "./schema-file.js";
 import { appendTargets, planAppend } from "./append.js";
 import {
   buildData,
@@ -50,6 +51,11 @@ program
     [],
   )
   .option("-c, --config <path>", "path to a config file")
+  .option(
+    "--schema-file <path>",
+    "read the schema from a .sql/DDL file instead of a live database (no connection needed; requires -o/--print)",
+  )
+  .option("--dialect <name>", "output SQL flavor for --schema-file: postgres (default), mysql, or sqlite")
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
   .option("--dry-run", "preview the plan (table order, row counts, sample rows) without writing")
@@ -71,8 +77,9 @@ program
   )
   .option("--preserve <col...>", "subset: keep these columns' real values, e.g. users.country", [])
   .action(async (connection, opts) => {
+    const offline = !!opts.schemaFile;
     const connStr = connection ?? process.env.DATABASE_URL;
-    if (!connStr) {
+    if (!connStr && !offline) {
       program.error("No connection string. Pass one as an argument or set DATABASE_URL.");
     }
 
@@ -98,6 +105,14 @@ program
       temporalWindow(config);
     } catch (err) {
       program.error(err instanceof Error ? err.message : String(err));
+    }
+
+    // Offline mode: build the schema from a DDL file and emit SQL with no DB.
+    // Only the file-output path makes sense here — append/subset/direct-insert
+    // all need a live database — so those combinations are rejected up front.
+    if (offline) {
+      await runOffline(opts, config);
+      return;
     }
 
     const dialect = dialectFor(connStr);
@@ -239,6 +254,79 @@ program
       await client.end();
     }
   });
+
+/**
+ * `--schema-file` path: parse a DDL file into a Schema and emit generated SQL
+ * without ever touching a database. Rejects the modes that inherently need a
+ * live connection (append, subset, direct insert into `--to`/the source).
+ */
+async function runOffline(opts: any, config: Config): Promise<void> {
+  if (opts.append) program.error("--append needs a live database; it can't run against --schema-file.");
+  if (opts.subset.length > 0) program.error("--subset needs a live database; it can't run against --schema-file.");
+  if (opts.to) program.error("--to needs a live database; it can't run against --schema-file.");
+  if (opts.truncate) program.error("--truncate needs a live database; it has no effect with --schema-file.");
+
+  const dialectName: DialectName = (opts.dialect ?? "postgres") as DialectName;
+  if (!["postgres", "mysql", "sqlite"].includes(dialectName)) {
+    program.error(`Unknown --dialect '${opts.dialect}'. Use postgres, mysql, or sqlite.`);
+  }
+  const dialect = dialectByName(dialectName);
+
+  let ddl: string;
+  try {
+    ddl = await readFile(opts.schemaFile, "utf8");
+  } catch (err) {
+    return program.error(`Can't read --schema-file ${opts.schemaFile}: ${err instanceof Error ? err.message : err}`);
+  }
+
+  const schema = loadSchemaFromDdl(ddl, "postgres");
+  if (schema.tables.size === 0) {
+    program.error(`No CREATE TABLE statements found in ${opts.schemaFile}.`);
+  }
+  const { order, cyclic } = topoSort(schema);
+
+  // Same up-front guard the live path uses: a required column of a type we can't
+  // synthesize would produce SQL the target database rejects, so flag it now.
+  const skipSet = new Set(config.skip ?? []);
+  const genKeys = order
+    .filter((t) => !skipSet.has(t.name) && !skipSet.has(t.key) && rowCount(t, config) > 0)
+    .map((t) => t.key);
+  const unsupported = requiredUnsupportedColumns(schema, config, genKeys);
+  if (unsupported.length > 0) {
+    const lines = unsupported.map((c) => `  ${c.table}.${c.column} (${c.udtName})`);
+    const first = unsupported[0];
+    program.error(
+      [
+        `Can't generate a value for ${unsupported.length} NOT NULL column(s) of an unsupported type:`,
+        ...lines,
+        "",
+        "Provide a value and re-run — e.g.:",
+        `  --column ${first.table}.${first.column}=value:<literal>`,
+        "(a faker path or values:a,b,c work too), or make the column nullable / give it a DB default.",
+      ].join("\n"),
+    );
+  }
+
+  if (opts.dryRun) {
+    console.error(formatPlan(buildPlan(schema, order, cyclic, config)));
+    return;
+  }
+
+  if (!opts.out && !opts.print) {
+    program.error("--schema-file has no database to write to: pass -o <file>, --print, or --dry-run.");
+  }
+
+  const data = buildData(schema, order, cyclic, config);
+  const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
+  const sql = dialect.toScript(data);
+  if (opts.out) {
+    await writeFile(opts.out, sql, "utf8");
+    console.error(summary(counts(data), cyclic, "Generated"));
+    console.error(`\n✓ Wrote ${totalRows} rows across ${data.length} tables to ${opts.out}`);
+  } else {
+    process.stdout.write(sql + "\n");
+  }
+}
 
 /** Normalize either materialized TableData or streaming stats into name/count pairs. */
 function counts(

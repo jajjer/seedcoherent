@@ -200,3 +200,15 @@ export function dialectFor(connStr: string): Dialect {
   if (isSqlite(connStr)) return sqliteDialect;
   return postgresDialect;
 }
+
+/** Pick a dialect by name — used for offline output-flavor selection (`--dialect`). */
+export function dialectByName(name: DialectName): Dialect {
+  switch (name) {
+    case "mysql":
+      return mysqlDialect;
+    case "sqlite":
+      return sqliteDialect;
+    default:
+      return postgresDialect;
+  }
+}

@@ -4,6 +4,27 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-08-02
+
+### Added
+
+- **Generate from a schema file — no database required.** The new
+  `--schema-file <path>` flag reads a Postgres `.sql`/DDL file (a migration or a
+  `pg_dump --schema-only` dump) and builds the same internal model introspection
+  would, then writes generated SQL with `-o`/`--print` (or previews with
+  `--dry-run`). Until now every run needed a live connection to introspect; you
+  can now seed in CI or before the database exists. It parses `CREATE TABLE`,
+  `CREATE TYPE … AS ENUM`, and `ALTER TABLE … ADD CONSTRAINT`, honoring `NOT
+  NULL`, `DEFAULT`, `SERIAL`/identity and generated columns, `varchar(n)` /
+  `numeric(p,s)`, primary/unique/foreign keys, and the CHECK shapes the live
+  parser already reads (numeric ranges, `IN (...)`, `BETWEEN`, `char_length`).
+  `--dialect postgres|mysql|sqlite` (default `postgres`) selects the emitted SQL
+  flavor. Statements it can't model (`CREATE DOMAIN`, extension types, `SET`,
+  `COMMENT`, …) are skipped rather than aborting the file, and a required column
+  left of an unsynthesizable type is reported up front — exactly as on a live
+  run. The live-only modes (`--append`, `--subset`, `--to`, `--truncate`) are
+  rejected with a clear message since they inherently need a database.
+
 ## [0.9.0] — 2026-08-01
 
 ### Added
