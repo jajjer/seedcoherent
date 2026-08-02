@@ -150,6 +150,16 @@ function generatorForType(col: ColumnInfo): Generator {
       return (f) => Buffer.from(f.string.alphanumeric(16));
     case "inet":
       return (f) => f.internet.ipv4();
+    case "money":
+      // A plain numeric string; Postgres coerces it to `money` on insert.
+      return (f) => f.finance.amount({ min: 0, max: 100_000, dec: 2 });
+    case "interval":
+      return (f) => intervalLiteral(f);
+    case "macaddr":
+      // Six colon-separated octets; Postgres widens this to macaddr8 as needed.
+      return (f) => f.internet.mac();
+    case "xml":
+      return (f) => `<record><id>${f.string.uuid()}</id><value>${f.lorem.word()}</value></record>`;
     case "array": {
       const elemGen = col.elementType ? typeRefGenerator(col.elementType) : (f: Faker) => f.lorem.word();
       return (f) => f.helpers.multiple(() => elemGen(f), { count: { min: 0, max: 3 } });
@@ -170,6 +180,18 @@ function generatorForType(col: ColumnInfo): Generator {
         return max && word.length > max ? word.slice(0, max) : word;
       };
   }
+}
+
+/**
+ * A Postgres `interval` literal like `"3 days 04:05:06"` — a random day span plus
+ * a time-of-day component. Postgres parses this textual form directly.
+ */
+function intervalLiteral(f: Faker): string {
+  const days = f.number.int({ min: 0, max: 90 });
+  const h = String(f.number.int({ min: 0, max: 23 })).padStart(2, "0");
+  const m = String(f.number.int({ min: 0, max: 59 })).padStart(2, "0");
+  const s = String(f.number.int({ min: 0, max: 59 })).padStart(2, "0");
+  return `${days} days ${h}:${m}:${s}`;
 }
 
 /** Minimal ColumnInfo so a nested type (array element, composite field) can reuse generatorForType. */

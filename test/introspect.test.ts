@@ -51,8 +51,17 @@ test("text-like types collapse to text", () => {
   }
 });
 
+test("money, interval, macaddr, and xml have their own categories", () => {
+  assert.equal(categorize("money", null), "money");
+  assert.equal(categorize("interval", null), "interval");
+  assert.equal(categorize("macaddr", null), "macaddr");
+  assert.equal(categorize("macaddr8", null), "macaddr");
+  assert.equal(categorize("xml", null), "xml");
+});
+
 test("unknown types are flagged unsupported, not guessed as text", () => {
   assert.equal(categorize("some_custom_domain", null), "unsupported");
   assert.equal(categorize("tsvector", null), "unsupported");
-  assert.equal(categorize("money", null), "unsupported");
+  assert.equal(categorize("geometry", null), "unsupported");
+  assert.equal(categorize("bit", null), "unsupported");
 });

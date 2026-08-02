@@ -4,6 +4,24 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-08-01
+
+### Added
+
+- **`money`, `interval`, `macaddr`/`macaddr8`, and `xml` columns now generate
+  real values.** In 0.8.1 these types stopped *crashing* the run — a `NOT NULL`
+  one with no default still hard-stopped it, telling you to pass `--column`.
+  They're now first-class: `money` gets a plausible amount, `interval` a random
+  day-plus-time span, `macaddr` a six-octet hardware address (widened to
+  `macaddr8` when the column calls for it), and `xml` a well-formed record
+  element. Each emits a textual literal Postgres coerces to the column type, so
+  it flows through both the multi-row-`INSERT` and streaming-`COPY` paths
+  unchanged and needs no `--column` override. Types that genuinely have no safe
+  default literal — `tsvector`, `bit`/`varbit`, PostGIS `geometry`, and other
+  extension types — stay `unsupported` and are handled exactly as before (NULL a
+  nullable column, skip a defaulted one, flag a required one up front). Output
+  for every schema without one of these four column types is byte-identical.
+
 ## [0.8.1] — 2026-07-30
 
 ### Fixed
