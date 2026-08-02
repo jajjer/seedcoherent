@@ -55,7 +55,14 @@ program
     "--schema-file <path>",
     "read the schema from a .sql/DDL file instead of a live database (no connection needed; requires -o/--print)",
   )
-  .option("--dialect <name>", "output SQL flavor for --schema-file: postgres (default), mysql, or sqlite")
+  .option(
+    "--dialect <name>",
+    "engine for --schema-file: parses that DDL grammar and emits that SQL flavor — postgres (default), mysql, or sqlite",
+  )
+  .option(
+    "--schema-dialect <name>",
+    "override the input DDL grammar alone (defaults to --dialect), to translate one engine's schema into another's seed SQL",
+  )
   .option("-o, --out <file>", "write SQL to a file instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
   .option("--dry-run", "preview the plan (table order, row counts, sample rows) without writing")
@@ -266,11 +273,19 @@ async function runOffline(opts: any, config: Config): Promise<void> {
   if (opts.to) program.error("--to needs a live database; it can't run against --schema-file.");
   if (opts.truncate) program.error("--truncate needs a live database; it has no effect with --schema-file.");
 
-  const dialectName: DialectName = (opts.dialect ?? "postgres") as DialectName;
-  if (!["postgres", "mysql", "sqlite"].includes(dialectName)) {
+  // `--dialect` picks the engine for schema-file mode: it selects both the DDL
+  // grammar to parse and the SQL flavor to emit. `--schema-dialect` overrides the
+  // input grammar alone, for the rarer case of translating one engine's schema
+  // into another's seed SQL (e.g. read Postgres DDL, emit MySQL).
+  const outputDialect: DialectName = (opts.dialect ?? "postgres") as DialectName;
+  if (!["postgres", "mysql", "sqlite"].includes(outputDialect)) {
     program.error(`Unknown --dialect '${opts.dialect}'. Use postgres, mysql, or sqlite.`);
   }
-  const dialect = dialectByName(dialectName);
+  const schemaDialect: DialectName = (opts.schemaDialect ?? outputDialect) as DialectName;
+  if (!["postgres", "mysql", "sqlite"].includes(schemaDialect)) {
+    program.error(`Unknown --schema-dialect '${opts.schemaDialect}'. Use postgres, mysql, or sqlite.`);
+  }
+  const dialect = dialectByName(outputDialect);
 
   let ddl: string;
   try {
@@ -279,7 +294,7 @@ async function runOffline(opts: any, config: Config): Promise<void> {
     return program.error(`Can't read --schema-file ${opts.schemaFile}: ${err instanceof Error ? err.message : err}`);
   }
 
-  const schema = loadSchemaFromDdl(ddl, "postgres");
+  const schema = loadSchemaFromDdl(ddl, schemaDialect);
   if (schema.tables.size === 0) {
     program.error(`No CREATE TABLE statements found in ${opts.schemaFile}.`);
   }

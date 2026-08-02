@@ -15,6 +15,7 @@
 
 import { parse } from "pgsql-ast-parser";
 import { categorize } from "./introspect.js";
+import { loadSchemaFromSqlDdl } from "./sql-ddl.js";
 import type {
   ColumnInfo,
   ForeignKey,
@@ -23,8 +24,8 @@ import type {
   TypeRef,
 } from "./types.js";
 
-/** Only Postgres DDL is understood today; the parameter keeps the seam explicit. */
-export type SchemaFileDialect = "postgres";
+/** Which DDL grammar a schema file is written in — one front-end per engine. */
+export type SchemaFileDialect = "postgres" | "mysql" | "sqlite";
 
 /**
  * Friendly Postgres type names (as written in DDL) mapped to the `udt` name
@@ -403,12 +404,23 @@ function buildTable(stmt: any, enums: Map<string, string[]>): TableInfo {
 }
 
 /**
- * Build a `Schema` from Postgres DDL text. Two passes: first collect enum label
- * sets (`CREATE TYPE ... AS ENUM`) so columns typed by them resolve to `enum`,
- * then build each table; `ALTER TABLE ... ADD CONSTRAINT` is folded in last so a
- * constraint declared after its table still lands on it.
+ * Build a `Schema` from a DDL file, dispatching to the right front-end for the
+ * file's grammar: Postgres via `pgsql-ast-parser` here, MySQL and SQLite via the
+ * hand-rolled parser in `sql-ddl.ts`. The three produce the same internal model,
+ * so everything downstream (topo-sort, generation, emit) is dialect-agnostic.
  */
-export function loadSchemaFromDdl(sql: string, _dialect: SchemaFileDialect = "postgres"): Schema {
+export function loadSchemaFromDdl(sql: string, dialect: SchemaFileDialect = "postgres"): Schema {
+  if (dialect === "mysql" || dialect === "sqlite") return loadSchemaFromSqlDdl(sql, dialect);
+  return loadPostgresDdl(sql);
+}
+
+/**
+ * Postgres front-end. Two passes: first collect enum label sets (`CREATE TYPE
+ * ... AS ENUM`) so columns typed by them resolve to `enum`, then build each
+ * table; `ALTER TABLE ... ADD CONSTRAINT` is folded in last so a constraint
+ * declared after its table still lands on it.
+ */
+function loadPostgresDdl(sql: string): Schema {
   const statements = parseStatements(sql);
 
   const enums = new Map<string, string[]>();

@@ -4,6 +4,30 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-08-02
+
+### Added
+
+- **`--schema-file` now reads MySQL and SQLite DDL, not just Postgres.** The
+  offline front-end used to parse only Postgres DDL (`--dialect` chose the output
+  flavor but the input was always Postgres). `--dialect` is now the *engine*: it
+  selects both the DDL grammar to parse and the SQL flavor to emit, so a MySQL
+  schema in gives MySQL seed SQL out and a SQLite schema gives SQLite — matching
+  the tool's "three databases, one tool" identity for the no-database path too.
+  Each grammar has a hand-rolled `CREATE TABLE` / `ALTER TABLE … ADD CONSTRAINT`
+  / `CREATE [UNIQUE] INDEX` parser that reuses that engine's live introspector,
+  so an offline column's category matches a connected one's: MySQL reads
+  backtick identifiers, `AUTO_INCREMENT`, inline `ENUM(...)`, `tinyint(1)`
+  booleans, `DECIMAL(p,s)`, `USE <db>`, and table options; SQLite reads
+  `AUTOINCREMENT`, the `INTEGER PRIMARY KEY` rowid alias, bracket/quoted
+  identifiers, declared-type affinity, and the `CHECK (x IN (...))` enum idiom.
+  Statements a grammar can't model (triggers, views, `SET`, extension types, …)
+  are skipped rather than aborting the file, exactly as on the Postgres path.
+- **`--schema-dialect <name>`** overrides the input DDL grammar alone (it
+  defaults to `--dialect`), for the rarer case of translating one engine's
+  schema into another's seed SQL — e.g. `--schema-dialect postgres --dialect
+  mysql` reads Postgres DDL and writes MySQL.
+
 ## [0.10.0] — 2026-08-02
 
 ### Added

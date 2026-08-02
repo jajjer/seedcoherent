@@ -135,19 +135,37 @@ path selects SQLite. On Postgres `--schema` defaults to `public`; on MySQL it
 defaults to the database named in the connection string; on SQLite it defaults
 to `main`.
 
-`--schema-file <path>` skips the connection entirely: it reads a Postgres
-`.sql`/DDL file (a migration or `pg_dump` schema dump) and builds the same model
+`--schema-file <path>` skips the connection entirely: it reads a `.sql`/DDL file
+(a migration or a `pg_dump`/`mysqldump`/`.schema` dump) and builds the same model
 introspection would, so you can generate seed data in CI or before any database
 exists. It needs a `-o <file>`/`--print`/`--dry-run` output — there's no database
 to insert into — and the live-only modes (`--append`, `--subset`, `--to`,
-`--truncate`) don't apply. `--dialect postgres|mysql|sqlite` (default `postgres`)
-picks the flavor of the emitted SQL. It parses `CREATE TABLE`, `CREATE TYPE …
-AS ENUM`, and `ALTER TABLE … ADD CONSTRAINT`, honoring `NOT NULL`, `DEFAULT`,
-`SERIAL`/identity, `varchar(n)`/`numeric(p,s)`, primary/unique/foreign keys, and
-the CHECK shapes the live parser reads; statements it can't model (`CREATE
-DOMAIN`, extension types, `SET`, …) are skipped, and any resulting required
-column of an unsynthesizable type is reported up front just as it is on a live
-run.
+`--truncate`) don't apply.
+
+`--dialect postgres|mysql|sqlite` (default `postgres`) selects the engine: it
+picks both the DDL grammar to parse *and* the flavor of SQL to emit, so a MySQL
+schema in gives MySQL seed SQL out. Point it at your own database's schema:
+
+```bash
+npx seedcoherent --schema-file schema.sql            --rows users=1000 -o seed.sql  # Postgres DDL → Postgres SQL
+npx seedcoherent --schema-file schema.sql --dialect mysql  --rows users=1000 -o seed.sql  # MySQL DDL → MySQL SQL
+npx seedcoherent --schema-file schema.sql --dialect sqlite --rows users=1000 -o seed.sql  # SQLite DDL → SQLite SQL
+```
+
+To translate across engines — read one dialect's schema and emit another's seed
+SQL — add `--schema-dialect <name>` to override the input grammar alone, e.g.
+`--schema-dialect postgres --dialect mysql` reads Postgres DDL and writes MySQL.
+
+Each grammar's front-end reuses that engine's live introspector, so an offline
+column's category matches a connected one's. All three parse `CREATE TABLE` and
+`ALTER TABLE … ADD CONSTRAINT`/`CREATE [UNIQUE] INDEX`, honoring `NOT NULL`,
+`DEFAULT`, identity (`SERIAL`, `AUTO_INCREMENT`, the SQLite `INTEGER PRIMARY KEY`
+rowid), length/precision, primary/unique/foreign keys, and the CHECK shapes the
+live parser reads. Postgres adds `CREATE TYPE … AS ENUM`; MySQL reads inline
+`ENUM(...)`, `tinyint(1)` booleans, and `USE <db>`; SQLite honors declared-type
+affinity and `CHECK (x IN (...))`. Statements a grammar can't model (extension
+types, triggers, views, `SET`, …) are skipped, and any resulting required column
+of an unsynthesizable type is reported up front just as it is on a live run.
 
 `--dry-run` reports what a run *would* do — no rows are written:
 
@@ -184,6 +202,9 @@ Sample rows:
 | `--distribution <col=kind...>` | Skew a column: FK fan-out (`orders.user_id=zipf`, `…=zipf:2`) or a value column's labels (`orders.status=zipf`, `orders.status=weighted:paid=0.9,refunded=0.1`); default `uniform` |
 | `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
 | `-c, --config <path>` | Config file (see below) |
+| `--schema-file <path>` | Read the schema from a `.sql`/DDL file instead of a live database (needs `-o`/`--print`/`--dry-run`; see below) |
+| `--dialect <name>` | Engine for `--schema-file`: parses that DDL grammar and emits that SQL flavor — `postgres` (default), `mysql`, or `sqlite` |
+| `--schema-dialect <name>` | Override the input DDL grammar alone (defaults to `--dialect`), to translate one engine's schema into another's seed SQL |
 | `-o, --out <file>` | Write SQL to a file instead of inserting |
 | `--print` | Print SQL to stdout |
 | `--dry-run` | Preview table order, row counts, and sample rows without writing |
@@ -400,8 +421,9 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 v0 — Postgres, MySQL, and SQLite, with three modes: generate-from-scratch,
 append to an already-populated database, and subset + anonymize real production
 data into staging. The schema can come from a live connection or, for
-generate-from-scratch, from a Postgres `.sql`/DDL file (`--schema-file`) so a run
-needs no database at all. On the roadmap: hosted generation.
+generate-from-scratch, from a Postgres, MySQL, or SQLite `.sql`/DDL file
+(`--schema-file --dialect …`) so a run needs no database at all. On the roadmap:
+hosted generation.
 
 MySQL and SQLite each target a single database per run (the one in the
 connection string / file, or those named via `--schema`); a subset `--to` a
