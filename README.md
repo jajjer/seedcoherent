@@ -99,6 +99,10 @@ npx seedcoherent $DATABASE_URL --rows users=1000 -o seed.sql
 # Print SQL to stdout
 npx seedcoherent $DATABASE_URL --rows users=100 --print
 
+# No database? Read the schema from a .sql/DDL file and write SQL — nothing to
+# connect to. Great for CI or seeding before the database exists.
+npx seedcoherent --schema-file schema.sql --rows users=1000 orders=5000 -o seed.sql
+
 # Deterministic output
 npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
 
@@ -130,6 +134,20 @@ MySQL; a `sqlite:`/`file:` URL, `:memory:`, or a bare `.db`/`.sqlite`/`.sqlite3`
 path selects SQLite. On Postgres `--schema` defaults to `public`; on MySQL it
 defaults to the database named in the connection string; on SQLite it defaults
 to `main`.
+
+`--schema-file <path>` skips the connection entirely: it reads a Postgres
+`.sql`/DDL file (a migration or `pg_dump` schema dump) and builds the same model
+introspection would, so you can generate seed data in CI or before any database
+exists. It needs a `-o <file>`/`--print`/`--dry-run` output — there's no database
+to insert into — and the live-only modes (`--append`, `--subset`, `--to`,
+`--truncate`) don't apply. `--dialect postgres|mysql|sqlite` (default `postgres`)
+picks the flavor of the emitted SQL. It parses `CREATE TABLE`, `CREATE TYPE …
+AS ENUM`, and `ALTER TABLE … ADD CONSTRAINT`, honoring `NOT NULL`, `DEFAULT`,
+`SERIAL`/identity, `varchar(n)`/`numeric(p,s)`, primary/unique/foreign keys, and
+the CHECK shapes the live parser reads; statements it can't model (`CREATE
+DOMAIN`, extension types, `SET`, …) are skipped, and any resulting required
+column of an unsynthesizable type is reported up front just as it is on a live
+run.
 
 `--dry-run` reports what a run *would* do — no rows are written:
 
@@ -381,8 +399,9 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 
 v0 — Postgres, MySQL, and SQLite, with three modes: generate-from-scratch,
 append to an already-populated database, and subset + anonymize real production
-data into staging. On the roadmap: hosted
-generation.
+data into staging. The schema can come from a live connection or, for
+generate-from-scratch, from a Postgres `.sql`/DDL file (`--schema-file`) so a run
+needs no database at all. On the roadmap: hosted generation.
 
 MySQL and SQLite each target a single database per run (the one in the
 connection string / file, or those named via `--schema`); a subset `--to` a

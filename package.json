@@ -1,6 +1,6 @@
 {
   "name": "seedcoherent",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Schema-aware synthetic data generator. Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.",
   "type": "module",
   "bin": {
@@ -49,7 +49,8 @@
     "commander": "^12.1.0",
     "mysql2": "^3.23.2",
     "pg": "^8.13.1",
-    "pg-copy-streams": "^7.0.0"
+    "pg-copy-streams": "^7.0.0",
+    "pgsql-ast-parser": "^12.0.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
