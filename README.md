@@ -35,7 +35,9 @@ everything and inserts in dependency order inside a single transaction.
 - **Handles real schemas.** Partitioned tables (rows are generated for the
   parent and land in a covered partition), composite types, range types,
   domains (with their `CHECK`s), and arrays — including `enum[]` — all generate
-  valid values instead of crashing the insert.
+  valid values instead of crashing the insert. The everyday non-scalar types —
+  `money`, `interval`, `macaddr`/`macaddr8`, `inet`/`cidr`, `uuid`, `xml`, and
+  `bytea` — generate valid literals too.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
 - **Realistic relationships.** Foreign keys don't have to fan out evenly. Ask for

@@ -138,7 +138,11 @@ const HARD_DDL = `
     moods  ${HARD}.mood[],
     home   ${HARD}.addr,
     zip    ${HARD}.us_zip,
-    win    tstzrange
+    win    tstzrange,
+    balance money NOT NULL,
+    ttl     interval NOT NULL,
+    hw_addr macaddr NOT NULL,
+    payload xml NOT NULL
   );
   CREATE TABLE ${HARD}.events (
     id         bigint GENERATED ALWAYS AS IDENTITY,
@@ -167,6 +171,14 @@ async function assertHardData() {
 
   // The domain's regex CHECK held for every generated zip.
   assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts WHERE zip IS NOT NULL AND zip !~ '^[0-9]{5}$'`), 0);
+
+  // money / interval / macaddr / xml all inserted as valid values of their type.
+  // (A malformed literal would have aborted the whole transaction, so a full
+  // count here is enough — but the type-strict predicates document the shape.)
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts WHERE balance >= 0::money`), 15);
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts WHERE ttl >= interval '0'`), 15);
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts WHERE hw_addr IS NOT NULL`), 15);
+  assert.equal(await count(`SELECT count(*)::int n FROM ${HARD}.accounts WHERE (xpath('/record/id', payload))[1] IS NOT NULL`), 15);
 
   // Enum-array elements are valid labels (the insert would have failed otherwise).
   assert.equal(

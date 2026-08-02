@@ -69,6 +69,27 @@ test("uuid column yields a uuid string", () => {
   assert.match(v as string, /^[0-9a-f-]{36}$/i);
 });
 
+test("money column yields a numeric string", () => {
+  const v = gen(col("balance", { udtName: "money" })) as string;
+  assert.equal(typeof v, "string");
+  assert.match(v, /^\d+\.\d{2}$/);
+});
+
+test("interval column yields a parseable interval literal", () => {
+  const v = gen(col("duration", { udtName: "interval" })) as string;
+  assert.match(v, /^\d+ days \d{2}:\d{2}:\d{2}$/);
+});
+
+test("macaddr column yields six colon-separated octets", () => {
+  const v = gen(col("hw_addr", { udtName: "macaddr" })) as string;
+  assert.match(v, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i);
+});
+
+test("xml column yields a well-formed record element", () => {
+  const v = gen(col("payload", { udtName: "xml" })) as string;
+  assert.match(v, /^<record><id>[0-9a-f-]{36}<\/id><value>[a-z]+<\/value><\/record>$/i);
+});
+
 test("decimal respects numeric scale", () => {
   const c = col("ratio", { udtName: "numeric", numericScale: 3 });
   const v = gen(c) as number;
