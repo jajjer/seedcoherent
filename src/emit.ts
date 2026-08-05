@@ -34,11 +34,17 @@ export function sqlLiteral(v: unknown, col: ColumnInfo): string {
   if (typeof v === "number") return String(v);
   if (v instanceof Date) return `'${v.toISOString()}'`;
   if (Buffer.isBuffer(v)) return `'\\x${v.toString("hex")}'`;
+  // A json/jsonb column encodes the whole value as JSON — including a JS array,
+  // which is a JSON array `[...]`, not a Postgres array `{...}`. Check this before
+  // the array branch so json arrays don't get the wrong literal form.
+  if (JSON_TYPES.has(col.dataType)) {
+    return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
+  }
   if (Array.isArray(v)) {
     const inner = v.map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`).join(",");
     return `'{${inner}}'`;
   }
-  if (JSON_TYPES.has(col.dataType) || typeof v === "object") {
+  if (typeof v === "object") {
     return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
   }
   return `'${String(v).replace(/'/g, "''")}'`;
@@ -106,8 +112,11 @@ export function copyValue(v: unknown, col: ColumnInfo): string {
   if (typeof v === "number") return String(v);
   if (v instanceof Date) return copyEscape(v.toISOString());
   if (Buffer.isBuffer(v)) return copyEscape(`\\x${v.toString("hex")}`);
+  // A json/jsonb column encodes as JSON first, so an array becomes `[...]` not
+  // the Postgres array `{...}` the next branch would produce.
+  if (JSON_TYPES.has(col.dataType)) return copyEscape(JSON.stringify(v));
   if (Array.isArray(v)) return copyEscape(pgArrayLiteral(v));
-  if (JSON_TYPES.has(col.dataType) || typeof v === "object") return copyEscape(JSON.stringify(v));
+  if (typeof v === "object") return copyEscape(JSON.stringify(v));
   return copyEscape(String(v));
 }
 

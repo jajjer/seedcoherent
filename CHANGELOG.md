@@ -4,6 +4,34 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-08-05
+
+### Added
+
+- **JSON/JSONB columns now generate name-shaped structures, not one opaque
+  stub.** A live database only tells us a column is `json`; its *name* is the
+  only hint about what it holds — exactly as with scalar columns. So the
+  generator now reads the name: an `address` column gets a structured
+  `{street, city, state, zip, country}`, `tags`/`labels` get a JSON string
+  array, `permissions`/`scopes` a role array, `settings`/`preferences` a small
+  `{theme, language, notifications}` object, `geo`/`coordinates` a `{lat, lng}`
+  pair, `dimensions` a `{width, height, unit}`, `contact` an `{email, phone}`,
+  `pricing` an `{amount, currency}`, and `profile` a `{bio, avatar, website}`.
+  Anything unrecognized falls through to a generic attribute bag. This extends
+  the tool's "column names drive realistic content" identity to structured
+  columns, which previously all got the same `{id, value}` placeholder.
+
+### Fixed
+
+- **A JSON column holding an array now emits a JSON array, not a Postgres
+  array.** On the Postgres emitters (both the multi-row `INSERT` and the
+  streaming `COPY` path) a JavaScript array was formatted as a Postgres array
+  literal `{"a","b"}` regardless of column type — invalid for a `jsonb` column,
+  which needs `["a","b"]::jsonb`. The emitter now checks the column's json
+  category before its array-literal branch, so a `jsonb` array column
+  serializes as JSON. (MySQL and SQLite were already correct, having no
+  Postgres-style array type.)
+
 ## [0.11.0] — 2026-08-02
 
 ### Added

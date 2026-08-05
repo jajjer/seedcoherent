@@ -45,6 +45,13 @@ test("objects and json columns are JSON-encoded and cast to jsonb", () => {
   assert.equal(sqlLiteral({ a: 1 }, jsonCol), `'{"a":1}'::jsonb`);
 });
 
+test("a json column holding an array emits a JSON array, not a Postgres array", () => {
+  // The value is a JS array but the column is jsonb, so it must serialize to
+  // `["a","b"]::jsonb`, never the Postgres array literal `{"a","b"}`.
+  assert.equal(sqlLiteral(["a", "b"], jsonCol), `'["a","b"]'::jsonb`);
+  assert.equal(copyValue(["a", "b"], jsonCol), `[\"a\",\"b\"]`);
+});
+
 test("single quotes in strings are doubled", () => {
   assert.equal(sqlLiteral("O'Brien", textCol), "'O''Brien'");
 });

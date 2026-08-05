@@ -145,7 +145,7 @@ function generatorForType(col: ColumnInfo): Generator {
     case "timestamp":
       return (f) => f.date.past({ years: 2 });
     case "json":
-      return (f) => ({ id: f.string.uuid(), value: f.lorem.word() });
+      return jsonGenerator(col);
     case "bytea":
       return (f) => Buffer.from(f.string.alphanumeric(16));
     case "inet":
@@ -180,6 +180,85 @@ function generatorForType(col: ColumnInfo): Generator {
         return max && word.length > max ? word.slice(0, max) : word;
       };
   }
+}
+
+/**
+ * Name-driven JSON/JSONB shapes. A live database only tells us a column is
+ * `json`; its *name* is the only hint about what it holds, exactly as with
+ * scalar columns. So `address` gets a structured address, `tags` a string
+ * array, `settings` a small preferences object — instead of the same opaque
+ * stub for every JSON column. First match wins; anything unrecognized falls
+ * through to a generic attribute bag. The result is a plain JS value the
+ * emitters already `JSON.stringify`, so it flows through unchanged.
+ */
+const JSON_RULES: NameRule[] = [
+  {
+    test: or(has("shippingaddress", "billingaddress"), tok("address")),
+    gen: (f) => ({
+      street: f.location.streetAddress(),
+      city: f.location.city(),
+      state: f.location.state({ abbreviated: true }),
+      zip: f.location.zipCode(),
+      country: f.location.country(),
+    }),
+  },
+  {
+    test: or(has("latlng"), tok("coordinates", "coords", "geo", "location")),
+    gen: (f) => ({ lat: f.location.latitude(), lng: f.location.longitude() }),
+  },
+  {
+    test: tok("tags", "labels", "keywords", "categories"),
+    gen: (f) => f.helpers.multiple(() => f.lorem.word(), { count: { min: 1, max: 4 } }),
+  },
+  {
+    test: tok("permissions", "scopes", "roles"),
+    gen: (f) => f.helpers.arrayElements(["read", "write", "create", "update", "delete", "admin"], { min: 1, max: 4 }),
+  },
+  {
+    test: tok("settings", "preferences", "prefs", "config", "configuration", "options"),
+    gen: (f) => ({
+      theme: f.helpers.arrayElement(["light", "dark", "system"]),
+      language: f.helpers.arrayElement(["en", "es", "fr", "de", "ja"]),
+      notifications: f.datatype.boolean(),
+    }),
+  },
+  {
+    test: or(has("dimensions"), tok("size")),
+    gen: (f) => ({
+      width: f.number.int({ min: 1, max: 200 }),
+      height: f.number.int({ min: 1, max: 200 }),
+      unit: "cm",
+    }),
+  },
+  {
+    test: tok("contact"),
+    gen: (f) => ({ email: f.internet.email().toLowerCase(), phone: f.phone.number() }),
+  },
+  {
+    test: or(has("pricing"), tok("price", "money", "cost")),
+    gen: (f) => ({ amount: Number(f.commerce.price()), currency: f.finance.currencyCode() }),
+  },
+  {
+    test: tok("profile"),
+    gen: (f) => ({ bio: f.lorem.sentence(), avatar: f.image.avatar(), website: f.internet.url() }),
+  },
+];
+
+/**
+ * Pick a JSON generator from the column name, or fall back to a generic bag of
+ * plausible attributes (kept small and stable so unmatched columns still emit a
+ * valid, varied object).
+ */
+function jsonGenerator(col: ColumnInfo): Generator {
+  const ctx: MatchCtx = { n: norm(col.name), tokens: tokenize(col.name) };
+  for (const rule of JSON_RULES) {
+    if (rule.test(ctx)) return rule.gen;
+  }
+  return (f) => ({
+    id: f.string.uuid(),
+    source: f.helpers.arrayElement(["web", "mobile", "api", "import"]),
+    version: f.number.int({ min: 1, max: 5 }),
+  });
 }
 
 /**
