@@ -40,6 +40,9 @@ everything and inserts in dependency order inside a single transaction.
   `bytea` — generate valid literals too.
 - **Looks real.** Name + type inference means `first_name`, `phone`, `city`,
   `status`, `total` come out looking like your actual data — not lorem ipsum.
+  The same name inference shapes `json`/`jsonb` columns: an `address` column
+  gets `{street, city, state, zip, country}`, `tags` a JSON string array,
+  `settings` a `{theme, language, notifications}` object — not one opaque stub.
 - **Realistic relationships.** Foreign keys don't have to fan out evenly. Ask for
   a `zipf` distribution and a few parents collect most of the children while the
   rest thin into a long tail — the lopsided shape real data has — so "top

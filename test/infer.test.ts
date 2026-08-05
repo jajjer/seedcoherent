@@ -293,3 +293,56 @@ test("numeric name rules never fire on a text column", () => {
   const v = gen(col("age", { udtName: "text" }));
   assert.equal(typeof v, "string");
 });
+
+// ---- JSON/JSONB name-driven shapes ----
+
+/** A JSON column whose name should drive its object shape. */
+function jsonVal(name: string): any {
+  return gen(col(name, { udtName: "jsonb" }));
+}
+
+test("address JSON column produces a structured address object", () => {
+  const v = jsonVal("shipping_address");
+  assert.equal(typeof v, "object");
+  for (const k of ["street", "city", "state", "zip", "country"]) {
+    assert.ok(typeof v[k] === "string" && v[k].length > 0, `expected ${k}`);
+  }
+});
+
+test("coordinates JSON column produces lat/lng numbers", () => {
+  const v = jsonVal("geo");
+  assert.equal(typeof v.lat, "number");
+  assert.equal(typeof v.lng, "number");
+});
+
+test("tags JSON column produces a non-empty string array", () => {
+  const v = jsonVal("tags");
+  assert.ok(Array.isArray(v) && v.length > 0);
+  assert.ok(v.every((t: unknown) => typeof t === "string"));
+});
+
+test("permissions JSON column draws from a role vocabulary", () => {
+  const v = jsonVal("permissions");
+  const allowed = ["read", "write", "create", "update", "delete", "admin"];
+  assert.ok(Array.isArray(v) && v.length > 0);
+  assert.ok(v.every((p: string) => allowed.includes(p)));
+});
+
+test("settings JSON column produces a preferences object", () => {
+  const v = jsonVal("settings");
+  assert.ok(["light", "dark", "system"].includes(v.theme));
+  assert.equal(typeof v.notifications, "boolean");
+});
+
+test("unrecognized JSON column falls back to a generic attribute bag", () => {
+  const v = jsonVal("payload");
+  assert.equal(typeof v, "object");
+  assert.ok(!Array.isArray(v));
+  assert.equal(typeof v.id, "string");
+});
+
+test("JSON shape wins over text name heuristics (json 'description')", () => {
+  // "description" is a text NAME_RULE, but a json column must stay an object.
+  const v = jsonVal("description");
+  assert.equal(typeof v, "object");
+});
