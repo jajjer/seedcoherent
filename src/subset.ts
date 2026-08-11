@@ -276,6 +276,74 @@ function representative(members: string[], referenced: Set<string>): string {
   return refs[0] ?? [...members].sort()[0];
 }
 
+/**
+ * Expand the user's `--link` groups into member sets that share one
+ * anonymization mapping. Each group's patterns are matched against every column
+ * (a bare `email` links every `email` column), overlapping groups are merged,
+ * and any group naming a key column is rejected — those belong to `--anonymize`,
+ * which remaps whole join groups. Single-column groups are dropped (nothing to
+ * share); the rest map each member to its group root.
+ */
+function linkGroups(
+  schema: Schema,
+  groups: string[][] | undefined,
+  protectedBy: Map<string, Set<string>>,
+): { linkGroupOf: Map<string, string>; linkMembers: Map<string, string[]> } {
+  const parent = new Map<string, string>();
+  const ensure = (m: string) => {
+    if (!parent.has(m)) parent.set(m, m);
+  };
+  const find = (m: string): string => {
+    let root = m;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    while (parent.get(m) !== root) {
+      const next = parent.get(m)!;
+      parent.set(m, root);
+      m = next;
+    }
+    return root;
+  };
+  const union = (a: string, b: string) => parent.set(find(a), find(b));
+
+  for (const patterns of groups ?? []) {
+    const match = columnMatcher(patterns);
+    const matched: string[] = [];
+    for (const table of schema.tables.values()) {
+      for (const col of table.columns) {
+        if (!match(table, col.name)) continue;
+        if (protectedBy.get(table.key)?.has(col.name)) {
+          throw new Error(
+            `--link can't include key column ${table.name}.${col.name}; ` +
+              `use --anonymize to remap join keys consistently.`,
+          );
+        }
+        matched.push(memberId(table.key, col.name));
+      }
+    }
+    if (matched.length === 0) {
+      throw new Error(`--link group "${patterns.join("=")}" matched no columns.`);
+    }
+    matched.forEach(ensure);
+    for (let i = 1; i < matched.length; i++) union(matched[0], matched[i]);
+  }
+
+  const byRoot = new Map<string, string[]>();
+  for (const m of parent.keys()) {
+    const root = find(m);
+    let list = byRoot.get(root);
+    if (!list) byRoot.set(root, (list = []));
+    list.push(m);
+  }
+  const linkGroupOf = new Map<string, string>();
+  const linkMembers = new Map<string, string[]>();
+  for (const [root, ms] of byRoot) {
+    if (ms.length < 2) continue; // one column matched — nothing to share
+    linkMembers.set(root, ms);
+    for (const m of ms) linkGroupOf.set(m, root);
+  }
+  return { linkGroupOf, linkMembers };
+}
+
 /** Anonymization state shared across every column of one forced join group. */
 interface GroupState {
   gen: Generator;
@@ -307,6 +375,7 @@ export function anonymizeAll(
   const isPreserved = columnMatcher(config.preserve);
   const isForced = columnMatcher(config.anonymize);
   const { groupOf, members, referenced } = keyGroups(schema);
+  const { linkGroupOf, linkMembers } = linkGroups(schema, config.link, protectedBy);
 
   // Join groups (size ≥ 2) the user asked to anonymize — naming any member
   // forces the whole group, so both sides of every join move together.
@@ -336,6 +405,22 @@ export function anonymizeAll(
     return st;
   };
 
+  // Shared state for each --link group: one generator (from the alphabetically
+  // first member) plus one cache + used-set across every linked column, so the
+  // same original scrubs to the same fake everywhere and distinct originals
+  // stay distinct (a bijection, so joins on the value survive).
+  const linkState = new Map<string, GroupState>();
+  const stateForLink = (root: string): GroupState => {
+    let st = linkState.get(root);
+    if (st) return st;
+    const [tk, c] = splitMember([...linkMembers.get(root)!].sort()[0]);
+    const table = schema.tables.get(tk)!;
+    const col = table.columns.find((x) => x.name === c)!;
+    const gen = inferGenerator(table, col, config.columns, parseChecks(table.checks).get(c));
+    linkState.set(root, (st = { gen, cache: new Map(), used: new Set() }));
+    return st;
+  };
+
   const result: TableData[] = [];
 
   for (const table of order) {
@@ -356,7 +441,8 @@ export function anonymizeAll(
       { group?: GroupState; gen?: Generator; cache?: Map<string, unknown>; used?: Set<string> }
     >();
     for (const col of emitCols) {
-      const root = groupOf.get(memberId(table.key, col.name));
+      const member = memberId(table.key, col.name);
+      const root = groupOf.get(member);
       const joinKey = root !== undefined && members.get(root)!.length >= 2;
 
       if (joinKey) {
@@ -367,6 +453,12 @@ export function anonymizeAll(
       if (isPreserved(table, col.name)) continue;
       // Non-key columns scrub by default; protected-but-ungrouped keys only when forced.
       if (keep.has(col.name) && !isForced(table, col.name)) continue;
+      // A --link member shares one mapping across its whole group.
+      const linkRoot = linkGroupOf.get(member);
+      if (linkRoot !== undefined) {
+        plan.set(col.name, { group: stateForLink(linkRoot) });
+        continue;
+      }
       plan.set(col.name, {
         gen: inferGenerator(table, col, config.columns, checks.get(col.name)),
         cache: new Map(),

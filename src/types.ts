@@ -209,4 +209,15 @@ export interface Config {
    * would normally be scrubbed. Same key forms as `anonymize`.
    */
   preserve?: string[];
+  /**
+   * Subset+anonymize only: groups of non-key columns that hold the *same* real
+   * value (a denormalized copy) and must therefore scrub to the *same* fake.
+   * Each group is a list of column patterns; the whole group shares one value
+   * mapping, so e.g. a user's email copied into `orders.customer_email`
+   * anonymizes identically in both — informal joins on the value survive. A
+   * pattern may match several columns (a bare `email` links every `email`
+   * column). Join keys are handled by `anonymize`, not here, so a group naming
+   * a key column is rejected. Same key forms as `anonymize`.
+   */
+  link?: string[][];
 }

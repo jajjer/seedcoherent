@@ -4,6 +4,25 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-08-11
+
+### Added
+
+- **`--link` keeps denormalized copies consistent through anonymization.**
+  Subset+anonymize already remaps *foreign-key* join groups consistently (both
+  sides of an FK move together via `--anonymize`), but real schemas often carry
+  a value no foreign key ties back to its source — a user's email copied into
+  `orders.customer_email`, a status duplicated across tables. Scrubbed
+  independently, those copies diverged, breaking any informal join on the value.
+  `--link users.email=orders.customer_email` (repeatable; each flag value is one
+  `=`-joined group) now groups such columns so they share a single value
+  mapping: the same original scrubs to the same fake in every linked column, and
+  distinct originals stay distinct. A pattern may match many columns (a bare
+  `--link email` links every `email` column) and overlapping groups merge. Join
+  keys stay the province of `--anonymize`, so a link naming a key column is
+  rejected with a pointer to it. Also available as a `link` array-of-groups in
+  the config file.
+
 ## [0.12.0] — 2026-08-05
 
 ### Added

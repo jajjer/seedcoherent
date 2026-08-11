@@ -114,6 +114,22 @@ function coerceLiteral(raw: string): unknown {
 }
 
 /**
+ * Parse repeated `--link` CLI flags into groups of column patterns that share
+ * one anonymization mapping. Each flag value is a single group, its columns
+ * joined by `=`, e.g. `users.email=orders.customer_email`. A one-column group
+ * is allowed (it's a harmless no-op) but an empty one is rejected.
+ */
+export function parseLinkGroups(specs: string[]): string[][] {
+  const out: string[][] = [];
+  for (const spec of specs) {
+    const cols = spec.split("=").map((s) => s.trim()).filter(Boolean);
+    if (cols.length === 0) throw new Error(`Invalid --link group "${spec}" (expected a=b[=c...])`);
+    out.push(cols);
+  }
+  return out;
+}
+
+/**
  * Parse repeated `column=generator` CLI flags into a per-column override map,
  * mirroring the config file's `columns` field. The right-hand side is one of:
  *   - a faker path, e.g. `users.email=internet.email` → resolve that generator

@@ -217,6 +217,7 @@ Sample rows:
 | `--to <connection>` | Target DB to insert the anonymized subset into |
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
+| `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
 
 ## Subset + anonymize real data
 
@@ -283,6 +284,30 @@ the same fake across every table, so referential integrity is preserved.
 Columns are matched as `table.column`, `schema.table.column`, or a bare
 `column`. Both flags also read from `anonymize` / `preserve` arrays in the
 [config file](#config-file).
+
+`--anonymize` keeps *foreign-key* joins consistent, but real schemas often
+**denormalize** a value — a user's email copied into `orders.customer_email`,
+say — that no foreign key ties back to the source. Scrubbed independently, the
+two copies diverge and any informal join on the value breaks. `--link` groups
+such columns so they share one mapping: the same original scrubs to the same
+fake in every linked column, and distinct originals stay distinct.
+
+```bash
+# The user email and its denormalized copy on orders scrub identically.
+npx seedcoherent $PROD_URL --subset orders=500 --to $STAGING_URL \
+  --link users.email=orders.customer_email
+
+# A bare name links every column called `email` across the schema.
+npx seedcoherent $PROD_URL --subset orders=500 --to $STAGING_URL --link email
+```
+
+Each `--link` value is one group; its columns are joined by `=` and matched by
+the same `table.column` / `schema.table.column` / bare `column` forms. A pattern
+may match several columns (a bare `email` links them all), and overlapping
+groups merge. `--link` is for *non-key* columns — join keys are already kept
+consistent by `--anonymize`, so naming a key column in a link is rejected. The
+config file's `link` field takes an array of groups, e.g.
+`"link": [["users.email", "orders.customer_email"]]`.
 
 ## Append to a database that already has data
 

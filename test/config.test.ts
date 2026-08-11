@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, parseColumnSpecs, parseRowSpecs } from "../src/config.js";
+import { loadConfig, parseColumnSpecs, parseLinkGroups, parseRowSpecs } from "../src/config.js";
 
 test("parseRowSpecs parses table=count pairs", () => {
   assert.deepEqual(parseRowSpecs(["users=1000", "orders=5000"]), {
@@ -75,6 +75,19 @@ test("parseColumnSpecs rejects specs without '=', empty sides, and empty value l
 
 test("parseColumnSpecs handles an empty list", () => {
   assert.deepEqual(parseColumnSpecs([]), {});
+});
+
+test("parseLinkGroups splits each flag value into a group on '='", () => {
+  assert.deepEqual(
+    parseLinkGroups(["users.email=orders.customer_email", "phone"]),
+    [["users.email", "orders.customer_email"], ["phone"]],
+  );
+});
+
+test("parseLinkGroups trims blanks and rejects an all-blank group", () => {
+  assert.deepEqual(parseLinkGroups([" a = b "]), [["a", "b"]]);
+  assert.throws(() => parseLinkGroups(["="]), /expected a=b/);
+  assert.deepEqual(parseLinkGroups([]), []);
 });
 
 test("loadConfig reads a JSON config from an explicit path", async () => {
