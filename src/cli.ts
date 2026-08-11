@@ -3,7 +3,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { loadConfig, parseColumnSpecs, parseDistSpecs, parseRowSpecs } from "./config.js";
+import { loadConfig, parseColumnSpecs, parseDistSpecs, parseLinkGroups, parseRowSpecs } from "./config.js";
 import { dialectByName, dialectFor, type DialectName } from "./dialect.js";
 import { loadSchemaFromDdl } from "./schema-file.js";
 import { appendTargets, planAppend } from "./append.js";
@@ -83,6 +83,11 @@ program
     [],
   )
   .option("--preserve <col...>", "subset: keep these columns' real values, e.g. users.country", [])
+  .option(
+    "--link <group...>",
+    "subset: scrub these columns to the SAME fake (denormalized copies), e.g. users.email=orders.customer_email",
+    [],
+  )
   .action(async (connection, opts) => {
     const offline = !!opts.schemaFile;
     const connStr = connection ?? process.env.DATABASE_URL;
@@ -104,6 +109,7 @@ program
       distributions: { ...fileConfig.distributions, ...parseDistSpecs(opts.distribution) },
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
+      link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
     };
 
     // Validate the temporal window up front so a bad --since/--until fails

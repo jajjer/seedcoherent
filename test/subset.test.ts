@@ -263,6 +263,105 @@ test("anonymizing either side of a join forces the whole group", async () => {
   assert.equal(ses.account_email, acc.email, "child FK matches scrubbed parent");
 });
 
+/** users <- orders, where orders carries a denormalized copy of the user email. */
+function denormSchema(): Schema {
+  const users = table("users", {
+    columns: [idCol(), col("email", { udtName: "text" }), col("first_name")],
+    primaryKey: ["id"],
+    uniques: [["email"]],
+  });
+  const orders = table("orders", {
+    columns: [idCol(), col("user_id", { udtName: "int4" }), col("customer_email", { udtName: "text" })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["user_id"], "users", ["id"])],
+  });
+  return schema(users, orders);
+}
+
+function denormData(): Record<string, Row[]> {
+  return {
+    users: [
+      { id: 1, email: "a@x.com", first_name: "Ann" },
+      { id: 2, email: "b@x.com", first_name: "Bob" },
+    ],
+    orders: [
+      { id: 100, user_id: 1, customer_email: "a@x.com" },
+      { id: 101, user_id: 2, customer_email: "b@x.com" },
+      { id: 102, user_id: 1, customer_email: "a@x.com" },
+    ],
+  };
+}
+
+test("without --link, a denormalized copy scrubs independently of its source", async () => {
+  const s = denormSchema();
+  const { order } = topoSort(s);
+  const sel = await collectSubset(s, { orders: 10 }, new FakeFetcher(denormData()));
+  const out = anonymizeAll(s, order, sel, { seed: 3 });
+  const emailById = new Map(
+    out.find((d) => d.table.key === "public.users")!.rows.map((u) => [u.id, u.email]),
+  );
+  const o100 = out.find((d) => d.table.key === "public.orders")!.rows.find((r) => r.id === 100)!;
+  // The copy got its own mapping, so it no longer matches the source email.
+  assert.notEqual(o100.customer_email, emailById.get(1));
+});
+
+test("--link scrubs a denormalized copy to the same fake as its source", async () => {
+  const s = denormSchema();
+  const { order } = topoSort(s);
+  const sel = await collectSubset(s, { orders: 10 }, new FakeFetcher(denormData()));
+  const out = anonymizeAll(s, order, sel, {
+    seed: 3,
+    link: [["users.email", "orders.customer_email"]],
+  });
+  const users = out.find((d) => d.table.key === "public.users")!.rows;
+  const orders = out.find((d) => d.table.key === "public.orders")!.rows;
+  const emailById = new Map(users.map((u) => [u.id, u.email]));
+  // Every order's copied email now equals its user's (scrubbed) email.
+  for (const o of orders) {
+    assert.equal(o.customer_email, emailById.get(o.user_id), "copy matches source");
+  }
+  // Still scrubbed off the originals and email-shaped.
+  assert.ok(!users.some((u) => u.email === "a@x.com" || u.email === "b@x.com"));
+  for (const u of users) assert.match(String(u.email), /@/);
+});
+
+test("a bare --link pattern links every column of that name", async () => {
+  const users = table("users", {
+    columns: [idCol(), col("email", { udtName: "text" })],
+    primaryKey: ["id"],
+    uniques: [["email"]],
+  });
+  const events = table("events", {
+    columns: [idCol(), col("user_id", { udtName: "int4" }), col("email", { udtName: "text" })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["user_id"], "users", ["id"])],
+  });
+  const s = schema(users, events);
+  const { order } = topoSort(s);
+  const data = {
+    users: [{ id: 1, email: "a@x.com" }, { id: 2, email: "b@x.com" }],
+    events: [{ id: 5, user_id: 1, email: "a@x.com" }, { id: 6, user_id: 2, email: "b@x.com" }],
+  };
+  const sel = await collectSubset(s, { events: 10 }, new FakeFetcher(data));
+  const out = anonymizeAll(s, order, sel, { seed: 9, link: [["email"]] });
+  const uById = new Map(
+    out.find((d) => d.table.key === "public.users")!.rows.map((r) => [r.id, r.email]),
+  );
+  for (const e of out.find((d) => d.table.key === "public.events")!.rows) {
+    assert.equal(e.email, uById.get(e.user_id), "linked by bare name");
+  }
+});
+
+test("--link rejects a key column, pointing at --anonymize", async () => {
+  const s = denormSchema();
+  const { order } = topoSort(s);
+  const sel = await collectSubset(s, { orders: 10 }, new FakeFetcher(denormData()));
+  assert.throws(
+    () => anonymizeAll(s, order, sel, { seed: 1, link: [["users.id", "orders.user_id"]] }),
+    /use --anonymize/,
+  );
+});
+
 test("anonymization is consistent per value and deterministic per seed", async () => {
   // first_name "Ann" appears once; add a duplicate to prove consistency.
   const s = shopSchema();
