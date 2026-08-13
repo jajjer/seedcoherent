@@ -4,9 +4,10 @@
  * and self-referential tables reference earlier rows in the same batch.
  */
 
-import { Faker, en, en_US } from "@faker-js/faker";
+import { Faker } from "@faker-js/faker";
 import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.js";
 import { applyCoherence, planCoherence } from "./coherence.js";
+import { resolveLocale } from "./locale.js";
 import { parseChecks } from "./checks.js";
 import { resolveDistribution, resolveValueSpec, type Sampler } from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
@@ -164,11 +165,14 @@ export function* streamData(
   batchSize: number = DEFAULT_BATCH_SIZE,
   append?: AppendContext,
 ): IterableIterator<Batch> {
-  const faker = new Faker({ locale: [en] });
-  // A separate en_US instance drives the intra-row coherence pass (US
-  // postcode-by-state data is absent from `en`). Keeping it off the main faker
-  // leaves every non-coherence column's seeded output byte-identical.
-  const cohFaker = new Faker({ locale: [en_US, en] });
+  // The requested --locale (default: US English) drives every generated value.
+  const locale = resolveLocale(config.locale);
+  const faker = new Faker({ locale: locale.main });
+  // A separate faker instance drives the intra-row coherence pass; it keeps
+  // en_US in the chain so US postcode-by-state data stays available (absent from
+  // plain `en`). Keeping it off the main faker leaves every non-coherence
+  // column's seeded output byte-identical.
+  const cohFaker = new Faker({ locale: locale.coherence });
   if (config.seed !== undefined) {
     faker.seed(config.seed);
     cohFaker.seed(config.seed);
@@ -286,7 +290,7 @@ export function* streamData(
         // checked, so a coherent value (e.g. a unique email derived from the name)
         // participates in the collision test.
         if (cplan) {
-          applyCoherence(cplan, candidate, cohFaker, coherenceEligible, frozen);
+          applyCoherence(cplan, candidate, cohFaker, coherenceEligible, frozen, locale.usAddress);
         }
         // Check every unique constraint.
         const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join("\u0001"));

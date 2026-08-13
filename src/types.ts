@@ -187,6 +187,15 @@ export interface Config {
   /** RNG seed for deterministic output. */
   seed?: number;
   /**
+   * Faker locale for generated values (names, emails, companies, phone numbers,
+   * address parts), e.g. `de`, `fr`, `pt_BR`, `en_GB`. Defaults to US English.
+   * Missing data categories fall back to English. The US-specific address
+   * coherence (a zip inside its state, a city inside it) applies only to the
+   * default and `en_US`; other locales still generate in-locale address values
+   * but without that cross-field guarantee.
+   */
+  locale?: string;
+  /**
    * Temporal coherence window (ISO date/timestamp). Creation timestamps are
    * drawn within [since, until]; a child's creation time is never earlier than
    * its parents'. Defaults: `until` is the seeded reference date (or now for an

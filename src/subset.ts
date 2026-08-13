@@ -14,10 +14,11 @@
  *      the join graph is byte-identical and referential integrity is guaranteed.
  */
 
-import { Faker, en } from "@faker-js/faker";
+import { Faker } from "@faker-js/faker";
 import { parseChecks } from "./checks.js";
 import type { Row, TableData } from "./generate.js";
 import { inferGenerator, type Generator } from "./infer.js";
+import { resolveLocale } from "./locale.js";
 import type { Config, Connection, Schema, TableInfo } from "./types.js";
 
 /** Abstracts the SELECT queries so the closure logic is testable off-DB. */
@@ -365,7 +366,7 @@ export function anonymizeAll(
   selected: Map<string, Row[]>,
   config: Config,
 ): TableData[] {
-  const faker = new Faker({ locale: [en] });
+  const faker = new Faker({ locale: resolveLocale(config.locale).main });
   if (config.seed !== undefined) {
     faker.seed(config.seed);
     faker.setDefaultRefDate("2025-01-01T00:00:00.000Z");

@@ -4,6 +4,28 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-08-13
+
+### Added
+
+- **`--locale <code>` generates values in a language/region other than US
+  English.** Every generated value already came from Faker, but always in its US
+  English locale — so a German or Japanese schema still got American names,
+  US-format phone numbers, and English country names. `--locale de` (or `fr`,
+  `pt_BR`, `en_GB`, … — any of Faker's 70-plus locales) now drives names, emails,
+  usernames, companies, phone numbers, and address parts in that locale, with
+  English as a fallback for any category a locale doesn't cover. Also available
+  as a `locale` field in the config file, and validated up front so an unknown
+  code fails before connecting, listing the valid ones. Intra-row **name**
+  coherence (a row's `full_name`/`email`/`username` deriving from its own first +
+  last name) is locale-aware and applies everywhere. The US-specific **address**
+  coherence — a `zip` that falls inside its `state`, a `city` that really sits in
+  it, `country = "United States"` — relies on en_US's postcode-by-state data,
+  which Faker has no equivalent of for other locales, so it applies only to the
+  default and an explicit `en_US`; under another locale the address columns are
+  still generated in-locale but without that cross-field guarantee. Default
+  (unqualified) runs are byte-identical to before.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

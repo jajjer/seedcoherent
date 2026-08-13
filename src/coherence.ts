@@ -181,7 +181,14 @@ function strVal(v: unknown): string | undefined {
  * `frozen` names user-pinned / partition-key columns to leave verbatim. A column
  * that is frozen still anchors its group (so derived values follow the pinned
  * name/place), and an intentionally-null nullable column is preserved. All draws
- * use `f` (an en_US Faker), so output stays deterministic under a seed.
+ * use `f` (a locale-aware Faker), so output stays deterministic under a seed.
+ *
+ * Name coherence (first/last/full/email/username) is locale-aware and always
+ * runs. Address coherence — a zip that falls inside its state, a city that sits
+ * in it, `country = "United States"` — is US-specific (it needs en_US's
+ * postcode-by-state data and a curated city list), so it runs only when
+ * `usAddress` is true. Under another locale the address columns are left to the
+ * ordinary in-locale generator instead.
  */
 export function applyCoherence(
   plan: CoherencePlan,
@@ -189,6 +196,7 @@ export function applyCoherence(
   f: Faker,
   eligible: (colName: string) => boolean,
   frozen: (colName: string) => boolean,
+  usAddress = true,
 ): void {
   const write = (colName: string, value: unknown) => {
     if (!eligible(colName) || frozen(colName)) return;
@@ -220,7 +228,7 @@ export function applyCoherence(
       );
     }
 
-    if (hasAddress(g)) {
+    if (usAddress && hasAddress(g)) {
       // Draw the state first — it anchors the place — then the zip and city that
       // sit inside it. Ordering matters for determinism: city is drawn last so a
       // schema that gains a city column keeps its existing state/zip output.
