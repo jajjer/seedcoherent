@@ -43,6 +43,13 @@ everything and inserts in dependency order inside a single transaction.
   The same name inference shapes `json`/`jsonb` columns: an `address` column
   gets `{street, city, state, zip, country}`, `tags` a JSON string array,
   `settings` a `{theme, language, notifications}` object — not one opaque stub.
+- **Speaks your language.** US English by default, but `--locale de` (or `fr`,
+  `ja`, `pt_BR`, `en_GB`, … — any of Faker's 70-plus locales) generates names,
+  emails, companies, phone numbers, and addresses in that locale, so a German
+  schema gets German names and phone formats instead of American ones. Name
+  coherence (a row's `full_name`/`email` from its own first + last name) follows
+  the locale; the US-specific zip-inside-state coherence stays a US-locale
+  feature.
 - **Realistic relationships.** Foreign keys don't have to fan out evenly. Ask for
   a `zipf` distribution and a few parents collect most of the children while the
   rest thin into a long tail — the lopsided shape real data has — so "top
@@ -108,6 +115,9 @@ npx seedcoherent --schema-file schema.sql --rows users=1000 orders=5000 -o seed.
 
 # Deterministic output
 npx seedcoherent $DATABASE_URL --rows users=100 --seed 42
+
+# Generate in another locale — names, phones, addresses come out German
+npx seedcoherent $DATABASE_URL --rows users=1000 --locale de
 
 # Bound the time window — creation timestamps land in [since, until], and
 # children still never predate their parents
@@ -199,6 +209,7 @@ Sample rows:
 | `-r, --rows <table=n...>` | Rows per table, e.g. `users=1000 orders=5000` |
 | `-d, --default-rows <n>` | Rows for tables not listed (default: 10) |
 | `-s, --seed <n>` | RNG seed for reproducible output |
+| `--locale <code>` | Faker locale for generated values (`de`, `fr`, `pt_BR`, `en_GB`, …); defaults to `en_US` (see below) |
 | `--batch-size <n>` | Rows per `COPY` batch (default: 10000; does not change output) |
 | `--schema <name...>` | Schema(s) to read (default: `public`) |
 | `--skip <table...>` | Tables to leave empty |
@@ -218,6 +229,32 @@ Sample rows:
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
 | `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
+
+### Locales
+
+By default every generated value is US English. `--locale <code>` switches to
+another of [Faker's locales](https://fakerjs.dev/guide/localization.html) —
+`de`, `fr`, `ja`, `pt_BR`, `en_GB`, and ~70 more — so names, emails, usernames,
+companies, phone numbers, and address parts all come out in that locale:
+
+```bash
+npx seedcoherent $DATABASE_URL --rows users=1000 --locale de   # German
+npx seedcoherent $DATABASE_URL --rows users=1000 --locale ja   # Japanese
+npx seedcoherent --schema-file schema.sql --rows users=1000 --locale pt_BR -o seed.sql
+```
+
+A locale that doesn't cover a given category falls back to English rather than
+failing, and an unknown code is rejected up front with the list of valid ones.
+The same option is a `"locale"` field in the [config file](#config-file).
+
+Intra-row **name** coherence — a row's `full_name`, `email`, and `username` all
+deriving from its own first + last name — is locale-aware and applies under every
+locale. The US-specific **address** coherence (a `zip` that falls inside its
+`state`, a `city` that really sits in it, `country = "United States"`) relies on
+en_US's postcode-by-state data, which Faker provides no equivalent of for other
+locales, so it applies only to the default and an explicit `en_US`. Under another
+locale the `state`/`zip`/`city`/`country` columns are still generated in-locale,
+just without that cross-field guarantee. Default (unqualified) runs are unchanged.
 
 ## Subset + anonymize real data
 
@@ -353,6 +390,7 @@ generators or set counts. CLI flags win over the file.
 {
   "defaultRows": 50,
   "seed": 42,
+  "locale": "de",
   "rows": { "users": 1000, "orders": 5000 },
   "skip": ["audit_log"],
   "columns": {

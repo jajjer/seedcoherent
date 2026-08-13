@@ -18,6 +18,7 @@ import {
 import { topoSort } from "./graph.js";
 import { buildAppendPlan, buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
+import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
 import type { Config, TableInfo } from "./types.js";
 
@@ -32,6 +33,7 @@ program
   .option("-r, --rows <spec...>", "rows per table, e.g. users=1000 orders=5000", [])
   .option("-d, --default-rows <n>", "default rows for tables not listed", (v) => parseInt(v, 10))
   .option("-s, --seed <n>", "RNG seed for deterministic output", (v) => parseInt(v, 10))
+  .option("--locale <code>", "Faker locale for generated values, e.g. de, fr, pt_BR, en_GB (default: en_US)")
   .option("--since <date>", "earliest creation timestamp (ISO date), e.g. 2023-01-01")
   .option("--until <date>", "latest creation timestamp (ISO date); defaults to the seed reference date / now")
   .option("--batch-size <n>", "rows per COPY batch (default 10000)", (v) => parseInt(v, 10))
@@ -102,6 +104,7 @@ program
       columns: { ...fileConfig.columns, ...parseColumnSpecs(opts.column) },
       defaultRows: opts.defaultRows ?? fileConfig.defaultRows,
       seed: opts.seed ?? fileConfig.seed,
+      locale: opts.locale ?? fileConfig.locale,
       since: opts.since ?? fileConfig.since,
       until: opts.until ?? fileConfig.until,
       batchSize: opts.batchSize ?? fileConfig.batchSize,
@@ -112,10 +115,12 @@ program
       link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
     };
 
-    // Validate the temporal window up front so a bad --since/--until fails
-    // before we connect (the dry-run plan path never reaches streamData).
+    // Validate the temporal window and locale up front so a bad --since/--until
+    // or --locale fails before we connect (the dry-run plan path never reaches
+    // streamData, where the locale would otherwise first be resolved).
     try {
       temporalWindow(config);
+      resolveLocale(config.locale);
     } catch (err) {
       program.error(err instanceof Error ? err.message : String(err));
     }
