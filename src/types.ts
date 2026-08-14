@@ -159,6 +159,13 @@ export type DistSpec =
   | { kind: "zipf"; skew?: number }
   | { kind: "weighted"; weights: Array<{ value: unknown; weight: number }> };
 
+/**
+ * How generated rows are serialized on the `--out`/`--print` path. `sql` (the
+ * default) emits a runnable script; `csv` and `ndjson` write one plain-text file
+ * per table into the `--out` directory, with no SQL and no database involved.
+ */
+export type OutputFormat = "sql" | "csv" | "ndjson";
+
 /** Per-column override supplied by the user via config. */
 export type ColumnOverride =
   | string // a faker path like "internet.email" or "person.firstName"
@@ -205,6 +212,12 @@ export interface Config {
   until?: string;
   /** Rows per COPY batch / streaming-generation chunk. Does not affect output. */
   batchSize?: number;
+  /**
+   * Output format for the `--out`/`--print` path: `sql` (default) emits a
+   * runnable script; `csv`/`ndjson` write one file per table into the `--out`
+   * directory. Ignored when inserting straight into a live database.
+   */
+  format?: OutputFormat;
   /**
    * Subset+anonymize only: columns to scrub even though they are join keys
    * (primary keys, FK columns, or columns an FK references). Naming any one

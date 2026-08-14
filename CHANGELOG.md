@@ -4,6 +4,29 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] — 2026-08-13
+
+### Added
+
+- **`--format csv|ndjson` writes the generated data as plain files, not SQL.**
+  Every mode's `-o`/`--print` path produced a runnable SQL script — the only way
+  to get rows out was through a database's SQL dialect. `--format csv` and
+  `--format ndjson` now emit the data itself instead: CSV with an RFC-4180 header
+  row, or newline-delimited JSON, so the same coherent, referentially-correct
+  rows can feed a spreadsheet, a data lake, a `COPY FROM`, or a language-native
+  test fixture with no database in the loop. Because CSV is inherently one table
+  per file, both formats write **one file per table** into the directory passed
+  as `-o` (`./seed/users.csv`, `./seed/orders.csv`), created if missing and
+  schema-qualified in the filename only when a bare table name would collide.
+  Serialization is identical whatever the source engine (Postgres, MySQL,
+  SQLite): timestamps become ISO-8601, binary becomes base64, and `json`/array
+  columns stay native JSON in NDJSON / a compact JSON string in CSV. Since these
+  formats produce files, the database-only destinations (`--print`, `--to`,
+  direct insert, `--truncate`) are rejected up front with a pointer to
+  `-o <dir>`. Works with generate, `--schema-file`, `--append`, and `--subset`
+  alike, and is also a `format` field in the config file. The default,
+  `--format sql`, is byte-identical to before.
+
 ## [0.14.0] — 2026-08-13
 
 ### Added

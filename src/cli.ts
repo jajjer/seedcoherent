@@ -4,7 +4,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { loadConfig, parseColumnSpecs, parseDistSpecs, parseLinkGroups, parseRowSpecs } from "./config.js";
-import { dialectByName, dialectFor, type DialectName } from "./dialect.js";
+import { dialectByName, dialectFor, type Dialect, type DialectName } from "./dialect.js";
+import { isOutputFormat, OUTPUT_FORMATS, writeTableFiles } from "./dataformat.js";
 import { loadSchemaFromDdl } from "./schema-file.js";
 import { appendTargets, planAppend } from "./append.js";
 import {
@@ -20,7 +21,8 @@ import { buildAppendPlan, buildPlan, buildSubsetPlan, formatPlan } from "./plan.
 import { anonymizeAll, collectSubset } from "./subset.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
-import type { Config, TableInfo } from "./types.js";
+import type { Config, OutputFormat, TableInfo } from "./types.js";
+import type { TableData } from "./generate.js";
 
 const program = new Command();
 
@@ -65,7 +67,11 @@ program
     "--schema-dialect <name>",
     "override the input DDL grammar alone (defaults to --dialect), to translate one engine's schema into another's seed SQL",
   )
-  .option("-o, --out <file>", "write SQL to a file instead of inserting")
+  .option(
+    "--format <name>",
+    "output format for -o/--print: sql (default), csv, or ndjson. csv/ndjson write one file per table into the -o <dir> directory",
+  )
+  .option("-o, --out <file>", "write SQL to a file (or, with --format csv/ndjson, one file per table into this directory) instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
   .option("--dry-run", "preview the plan (table order, row counts, sample rows) without writing")
   .option(
@@ -108,6 +114,7 @@ program
       since: opts.since ?? fileConfig.since,
       until: opts.until ?? fileConfig.until,
       batchSize: opts.batchSize ?? fileConfig.batchSize,
+      format: opts.format ?? fileConfig.format,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
       distributions: { ...fileConfig.distributions, ...parseDistSpecs(opts.distribution) },
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
@@ -125,11 +132,27 @@ program
       program.error(err instanceof Error ? err.message : String(err));
     }
 
+    // --format selects how the --out/--print path serializes rows. `sql` is the
+    // default and unchanged; `csv`/`ndjson` write one file per table into an
+    // --out directory, so the destinations that only SQL can reach (stdout, a
+    // live DB via direct insert or --to, and TRUNCATE) are rejected up front.
+    // A dry-run writes nothing, so it skips these destination checks.
+    const format: OutputFormat = config.format ?? "sql";
+    if (config.format !== undefined && !isOutputFormat(config.format)) {
+      program.error(`Unknown --format '${config.format}'. Use ${OUTPUT_FORMATS.join(", ")}.`);
+    }
+    if (format !== "sql" && !opts.dryRun) {
+      if (opts.print) program.error(`--format ${format} writes one file per table; use --out <dir> instead of --print.`);
+      if (opts.to) program.error(`--format ${format} writes files, not to a database; use --out <dir> instead of --to.`);
+      if (opts.truncate) program.error(`--truncate has no meaning with --format ${format}; it only writes files.`);
+      if (!opts.out) program.error(`--format ${format} needs an output directory: pass --out <dir>.`);
+    }
+
     // Offline mode: build the schema from a DDL file and emit SQL with no DB.
     // Only the file-output path makes sense here — append/subset/direct-insert
     // all need a live database — so those combinations are rejected up front.
     if (offline) {
-      await runOffline(opts, config);
+      await runOffline(opts, config, format);
       return;
     }
 
@@ -216,19 +239,11 @@ program
       }
 
       if (opts.out || opts.print) {
-        // SQL emit needs the full dataset in memory to assemble the script.
+        // File/stdout output needs the full dataset in memory to assemble it.
         const data = isSubset
           ? await subsetData()
           : buildData(schema, order, cyclic, config, appendCtx);
-        const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
-        const sql = dialect.toScript(data);
-        if (opts.out) {
-          await writeFile(opts.out, sql, "utf8");
-          console.error(summary(counts(data), cyclic, verb));
-          console.error(`\n✓ Wrote ${totalRows} rows across ${data.length} tables to ${opts.out}`);
-        } else {
-          process.stdout.write(sql + "\n");
-        }
+        await writeMaterialized(data, format, opts, dialect, verb, cyclic);
       } else if (isSubset) {
         // Never write anonymized rows back into the source; require an explicit target.
         if (!opts.to) {
@@ -278,7 +293,7 @@ program
  * without ever touching a database. Rejects the modes that inherently need a
  * live connection (append, subset, direct insert into `--to`/the source).
  */
-async function runOffline(opts: any, config: Config): Promise<void> {
+async function runOffline(opts: any, config: Config, format: OutputFormat): Promise<void> {
   if (opts.append) program.error("--append needs a live database; it can't run against --schema-file.");
   if (opts.subset.length > 0) program.error("--subset needs a live database; it can't run against --schema-file.");
   if (opts.to) program.error("--to needs a live database; it can't run against --schema-file.");
@@ -343,11 +358,34 @@ async function runOffline(opts: any, config: Config): Promise<void> {
   }
 
   const data = buildData(schema, order, cyclic, config);
-  const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
+  await writeMaterialized(data, format, opts, dialect, "Generated", cyclic);
+}
+
+/**
+ * Serialize a fully-materialized dataset to the chosen destination. `sql` writes
+ * a single script to `--out` (with a summary) or stdout (bare, pipe-friendly);
+ * `csv`/`ndjson` write one file per table into the `--out` directory — that
+ * directory is guaranteed present by the up-front `--format` checks.
+ */
+async function writeMaterialized(
+  data: TableData[],
+  format: OutputFormat,
+  opts: any,
+  dialect: Dialect,
+  verb: string,
+  cyclic: Set<string>,
+): Promise<void> {
+  if (format !== "sql") {
+    const { rows, files } = await writeTableFiles(data, opts.out, format);
+    console.error(summary(counts(data), cyclic, verb));
+    console.error(`\n✓ Wrote ${rows} rows across ${files} ${format} file(s) to ${opts.out}`);
+    return;
+  }
   const sql = dialect.toScript(data);
   if (opts.out) {
+    const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
     await writeFile(opts.out, sql, "utf8");
-    console.error(summary(counts(data), cyclic, "Generated"));
+    console.error(summary(counts(data), cyclic, verb));
     console.error(`\n✓ Wrote ${totalRows} rows across ${data.length} tables to ${opts.out}`);
   } else {
     process.stdout.write(sql + "\n");
