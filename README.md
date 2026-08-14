@@ -219,7 +219,8 @@ Sample rows:
 | `--schema-file <path>` | Read the schema from a `.sql`/DDL file instead of a live database (needs `-o`/`--print`/`--dry-run`; see below) |
 | `--dialect <name>` | Engine for `--schema-file`: parses that DDL grammar and emits that SQL flavor — `postgres` (default), `mysql`, or `sqlite` |
 | `--schema-dialect <name>` | Override the input DDL grammar alone (defaults to `--dialect`), to translate one engine's schema into another's seed SQL |
-| `-o, --out <file>` | Write SQL to a file instead of inserting |
+| `--format <name>` | Output format for `-o`/`--print`: `sql` (default), `csv`, or `ndjson`; `csv`/`ndjson` write one file per table into the `-o <dir>` directory (see below) |
+| `-o, --out <file>` | Write SQL to a file (or, with `--format csv`/`ndjson`, one file per table into this directory) instead of inserting |
 | `--print` | Print SQL to stdout |
 | `--dry-run` | Preview table order, row counts, and sample rows without writing |
 | `--append` | Add rows to a database that already has data (see below) |
@@ -255,6 +256,35 @@ en_US's postcode-by-state data, which Faker provides no equivalent of for other
 locales, so it applies only to the default and an explicit `en_US`. Under another
 locale the `state`/`zip`/`city`/`country` columns are still generated in-locale,
 just without that cross-field guarantee. Default (unqualified) runs are unchanged.
+
+### CSV / NDJSON output
+
+By default `-o`/`--print` emit a runnable SQL script. `--format csv` and
+`--format ndjson` instead write the *data itself* — no SQL, no database — so the
+generated rows can feed a spreadsheet, a data lake, a `COPY FROM`, or a
+language-native test fixture. Because CSV is inherently one table per file, these
+formats write **one file per table** into the directory you pass as `-o`:
+
+```bash
+npx seedcoherent --schema-file schema.sql --rows users=1000 orders=5000 --format csv    -o ./seed
+npx seedcoherent $DATABASE_URL            --rows users=1000              --format ndjson -o ./seed
+# ./seed/users.csv, ./seed/orders.csv   (or .ndjson)
+```
+
+The directory is created if missing, and a file is written for every table that
+has rows (empty tables are skipped, just as the SQL script emits no `INSERT` for
+them). Each file is named for its table, qualified with its schema
+(`public.users.csv`) only when a bare name would collide across schemas.
+
+Values serialize the same way regardless of the source database (Postgres,
+MySQL, or SQLite): CSV follows RFC-4180 quoting with a header row; NDJSON writes
+one JSON object per line. In both, timestamps become ISO-8601 strings and binary
+becomes base64; `json`/array columns stay native JSON in NDJSON and become a
+compact JSON string in CSV. These formats produce files, so they can't insert
+into a live database — `--print`, `--to`, direct insert, and `--truncate` are
+rejected with a pointer to `-o <dir>`. Works with generate, `--schema-file`,
+`--append`, and `--subset` alike. The same option is a `"format"` field in the
+[config file](#config-file). `--format sql` (the default) is unchanged.
 
 ## Subset + anonymize real data
 
@@ -391,6 +421,7 @@ generators or set counts. CLI flags win over the file.
   "defaultRows": 50,
   "seed": 42,
   "locale": "de",
+  "format": "csv",
   "rows": { "users": 1000, "orders": 5000 },
   "skip": ["audit_log"],
   "columns": {
@@ -462,7 +493,8 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
    generation never holds the whole dataset in memory, all inside one
    transaction: `COPY ... FROM STDIN` on Postgres, batched multi-row `INSERT` on
    MySQL and SQLite. `--out`/`--print` write a runnable SQL script for the source
-   dialect instead.
+   dialect instead, or — with `--format csv`/`ndjson` — one plain-text data file
+   per table.
 
 ## Tests
 
