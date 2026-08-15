@@ -4,6 +4,40 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] — 2026-08-15
+
+### Added
+
+- **A programmatic API returns the generated rows in memory — no subprocess, no
+  files.** Everything was CLI-only: the sole way to get rows out was to shell out
+  and read back a SQL script, CSV, or NDJSON. `seedcoherent` now ships a Node/
+  TypeScript entry point, so a test suite can `import { seed }` and get the same
+  coherent, referentially-correct rows as data:
+
+  ```ts
+  import { seed } from "seedcoherent";
+
+  const { data } = await seed({
+    ddl: schemaString,           // or schemaFile: "schema.sql", or connection: "postgres://…"
+    rows: { users: 100, orders: 500 },
+    seed: 42,
+  });
+  data.users;  // -> [{ id: 1, email: "…", first_name: "…", … }, …]
+  ```
+
+  The schema comes from one of three mutually-exclusive sources — an inline `ddl`
+  string, a `schemaFile` path, or a live `connection` (introspected read-only and
+  closed before the call resolves). Every generation knob the CLI has is a field:
+  `rows`, `defaultRows`, `seed`, `locale`, `since`/`until`, `skip`,
+  `distributions`, and per-column `columns` overrides, plus `dialect`/
+  `schemaDialect`/`schemas`. The result carries an ergonomic `data` map (keyed by
+  table name for destructuring — schema-qualified only when a bare name collides
+  across schemas), an ordered `tables` array with schema/key/column metadata, and
+  a `toSQL(dialect?)` method that renders the dataset as a runnable script in any
+  of the three SQL flavors. The same up-front validation the CLI does (temporal
+  window, locale, unsynthesizable required columns) throws before any rows are
+  built. The package now exposes `main`/`types`/`exports`; the CLI is unchanged.
+
 ## [0.15.0] — 2026-08-13
 
 ### Added

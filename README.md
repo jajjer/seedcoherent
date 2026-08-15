@@ -286,6 +286,54 @@ rejected with a pointer to `-o <dir>`. Works with generate, `--schema-file`,
 `--append`, and `--subset` alike. The same option is a `"format"` field in the
 [config file](#config-file). `--format sql` (the default) is unchanged.
 
+## Use it as a library
+
+Everything above is the CLI, but the same generator is importable — so a test
+suite can get coherent rows as **data**, with no subprocess and no files to read
+back:
+
+```ts
+import { seed } from "seedcoherent";
+
+const { data } = await seed({
+  ddl: `CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT);
+        CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INT NOT NULL REFERENCES users(id), total NUMERIC(10,2));`,
+  rows: { users: 100, orders: 500 },
+  seed: 42,
+});
+
+data.users;   // -> [{ id: 1, email: "…", name: "…" }, …]
+data.orders;  // -> [{ id: 1, user_id: 1, total: 42.5 }, …]  — every user_id points at a real user
+```
+
+The schema comes from one of three mutually-exclusive sources:
+
+- **`ddl`** — an inline DDL string (`CREATE TABLE …`), nothing to connect to.
+- **`schemaFile`** — a path to a `.sql`/DDL dump.
+- **`connection`** — a live database URL, introspected **read-only** (nothing is
+  written) and closed before the call resolves.
+
+Every CLI knob is a field: `rows`, `defaultRows`, `seed`, `locale`,
+`since`/`until`, `skip`, `distributions`, and per-column `columns` overrides,
+plus `dialect`/`schemaDialect` (for `ddl`/`schemaFile`) and `schemas` (for a live
+`connection`).
+
+`seed()` resolves to a result with three parts:
+
+```ts
+const result = await seed({ schemaFile: "schema.sql", rows: { users: 10 } });
+
+result.data;       // { users: Row[], orders: Row[] } — keyed by table for destructuring
+result.tables;     // ordered [{ name, schema, key, columns, rows }, …] in dependency order
+result.toSQL();    // a runnable SQL script; pass "mysql" | "sqlite" to change the flavor
+```
+
+`data` is keyed by bare table name for easy destructuring
+(`const { users, orders } = result.data`); a table whose bare name collides
+across schemas is keyed by its full `schema.name` instead. The same up-front
+validation the CLI does — the temporal window, the locale, and any required
+column of a type it can't synthesize — throws before any rows are generated.
+
 ## Subset + anonymize real data
 
 Point `seedcoherent` at a **real** database, pull a small, referentially-complete
