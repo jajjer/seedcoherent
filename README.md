@@ -59,6 +59,11 @@ everything and inserts in dependency order inside a single transaction.
   `values:` list. Ask for `status=weighted:paid=0.9,refunded=0.1` and 90% of
   orders come out `paid`; ask for `zipf` and the column skews toward its first
   label — no more dead-even splits across states real data never has.
+- **Nullable like real data.** `--null-rate users.middle_name=0.7` leaves a
+  column empty on the fraction of rows real data does — a `deleted_at` `NULL` on
+  every live row, an optional field present a third of the time — instead of one
+  fixed rate everywhere. `0` always fills, `1` always nulls; keys and FKs are
+  left alone so joins still resolve.
 - **Grows existing data, not just fresh schemas.** `--append` adds rows to a
   database that already has data: only the tables you name grow, their foreign
   keys reference the rows already there, and synthetic ids continue past the
@@ -215,6 +220,7 @@ Sample rows:
 | `--skip <table...>` | Tables to leave empty |
 | `--distribution <col=kind...>` | Skew a column: FK fan-out (`orders.user_id=zipf`, `…=zipf:2`) or a value column's labels (`orders.status=zipf`, `orders.status=weighted:paid=0.9,refunded=0.1`); default `uniform` |
 | `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
+| `--null-rate <col=rate...>` | Fraction (0–1) of rows a nullable column is left `NULL`, e.g. `users.middle_name=0.7` or `orders.deleted_at=1` (see below) |
 | `-c, --config <path>` | Config file (see below) |
 | `--schema-file <path>` | Read the schema from a `.sql`/DDL file instead of a live database (needs `-o`/`--print`/`--dry-run`; see below) |
 | `--dialect <name>` | Engine for `--schema-file`: parses that DDL grammar and emits that SQL flavor — `postgres` (default), `mysql`, or `sqlite` |
@@ -230,6 +236,31 @@ Sample rows:
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
 | `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
+
+### Null rates
+
+Real tables are full of nullable columns that are *usually* empty — a
+`deleted_at` on live rows, an optional `middle_name`, a rarely-filled
+`phone_secondary`. By default every nullable column is left `NULL` at a small
+fixed rate, which flattens that shape. `--null-rate` sets the fraction (0–1) of
+rows a given column is left `NULL` instead of generating a value:
+
+```bash
+# 70% of users have no middle name; every row is soft-delete-free (deleted_at
+# always NULL); the notes column is always populated.
+npx seedcoherent $DATABASE_URL --rows users=1000 \
+  --null-rate users.middle_name=0.7 users.deleted_at=1 users.notes=0
+```
+
+`0` fills the column on every row, `1` leaves it `NULL` on every row, and
+anything between skews toward production's real emptiness. Columns are matched as
+`table.column`, `schema.table.column`, or a bare `column`, the same precedence
+`--distribution` and `--column` use. A rate only applies where a `NULL` is
+already valid — a `NOT NULL` column, a primary-key/unique column, a partition
+key, or a foreign-key column is left untouched (an FK still points at a real
+parent). The same option is a `"nullRates"` map in the
+[config file](#config-file), and out-of-range values are rejected up front.
+Default (unqualified) runs are unchanged.
 
 ### Locales
 
@@ -314,9 +345,9 @@ The schema comes from one of three mutually-exclusive sources:
   written) and closed before the call resolves.
 
 Every CLI knob is a field: `rows`, `defaultRows`, `seed`, `locale`,
-`since`/`until`, `skip`, `distributions`, and per-column `columns` overrides,
-plus `dialect`/`schemaDialect` (for `ddl`/`schemaFile`) and `schemas` (for a live
-`connection`).
+`since`/`until`, `skip`, `distributions`, `nullRates`, and per-column `columns`
+overrides, plus `dialect`/`schemaDialect` (for `ddl`/`schemaFile`) and `schemas`
+(for a live `connection`).
 
 `seed()` resolves to a result with three parts:
 
@@ -485,6 +516,7 @@ generators or set counts. CLI flags win over the file.
       { "value": "refunded", "weight": 0.1 }
     ] }
   },
+  "nullRates": { "users.middle_name": 0.7, "orders.deleted_at": 1 },
   "anonymize": ["accounts.email"],
   "preserve": ["users.country"]
 }
@@ -510,6 +542,11 @@ law); raise it to concentrate harder, lower it toward uniform. `"weighted"`
 assigns explicit relative weights to named values (for a value column only — it
 carries its own labels, and is ignored on a foreign key). Referential integrity
 is unchanged — every child still points at a real parent.
+
+`nullRates` maps a column (same key forms) to the fraction of rows left `NULL`,
+matching the `--null-rate` flag — `0` always fills, `1` always nulls. It applies
+only to plain nullable columns; `NOT NULL`, key, partition-key, and foreign-key
+columns ignore it.
 
 `anonymize` and `preserve` are subset-mode lists of columns to scrub or keep,
 matching the `--anonymize` / `--preserve` flags (which append to them).

@@ -189,6 +189,17 @@ export interface Config {
    * "schema.table.column", or bare "column".
    */
   distributions?: Record<string, DistSpec>;
+  /**
+   * Per-column NULL fraction for plain nullable columns: the probability (0–1)
+   * that a given row leaves the column NULL instead of generating a value.
+   * Defaults to a small fixed rate for every nullable column; set `0` to fill a
+   * column on every row, `1` to always leave it NULL (e.g. an inactive
+   * `deleted_at`), or something in between to match production shape. Applies
+   * only where a NULL is already valid — a NOT NULL column, a unique/primary-key
+   * column, a partition key, or a foreign-key column is unaffected. Keyed by
+   * "table.column", "schema.table.column", or bare "column".
+   */
+  nullRates?: Record<string, number>;
   /** Tables to skip entirely. */
   skip?: string[];
   /** RNG seed for deterministic output. */

@@ -3,7 +3,15 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
-import { loadConfig, parseColumnSpecs, parseDistSpecs, parseLinkGroups, parseRowSpecs } from "./config.js";
+import {
+  loadConfig,
+  parseColumnSpecs,
+  parseDistSpecs,
+  parseLinkGroups,
+  parseNullRateSpecs,
+  parseRowSpecs,
+  validateNullRates,
+} from "./config.js";
 import { dialectByName, dialectFor, type Dialect, type DialectName } from "./dialect.js";
 import { isOutputFormat, OUTPUT_FORMATS, writeTableFiles } from "./dataformat.js";
 import { loadSchemaFromDdl } from "./schema-file.js";
@@ -52,6 +60,11 @@ program
   .option(
     "-C, --column <spec...>",
     "override a column's generator: users.email=internet.email, status=values:active,inactive, or tier=value:gold",
+    [],
+  )
+  .option(
+    "--null-rate <spec...>",
+    "fraction (0-1) of rows a nullable column is left NULL, e.g. users.middle_name=0.7 or orders.deleted_at=1",
     [],
   )
   .option("-c, --config <path>", "path to a config file")
@@ -117,6 +130,7 @@ program
       format: opts.format ?? fileConfig.format,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
       distributions: { ...fileConfig.distributions, ...parseDistSpecs(opts.distribution) },
+      nullRates: { ...fileConfig.nullRates, ...parseNullRateSpecs(opts.nullRate) },
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
       link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
@@ -128,6 +142,7 @@ program
     try {
       temporalWindow(config);
       resolveLocale(config.locale);
+      validateNullRates(config.nullRates);
     } catch (err) {
       program.error(err instanceof Error ? err.message : String(err));
     }

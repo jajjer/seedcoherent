@@ -221,6 +221,15 @@ export function* streamData(
         );
       }
     }
+    // Pre-resolve a per-column NULL fraction for the plain-nullable path; columns
+    // without a configured rate fall back to the default in valueForColumn.
+    const nullRates = new Map<string, number>();
+    if (config.nullRates) {
+      for (const col of emitCols) {
+        const rate = resolveNullRate(table, col.name, config.nullRates);
+        if (rate !== undefined) nullRates.set(col.name, rate);
+      }
+    }
     // Bind a parent-selection sampler per cross-table FK. Topological order means
     // every parent pool is already fully generated, so each sampler can be fixed
     // to its pool now (precomputing any weight tables once). Self-refs stay on the
@@ -273,6 +282,7 @@ export function* streamData(
             table,
             col,
             gens,
+            nullRates,
             faker,
             fkSamplers,
             fkParents,
@@ -438,10 +448,29 @@ function isOverridden(
   );
 }
 
+/**
+ * Resolve a column's configured NULL fraction, honoring keys of the form
+ * "table.column", "schema.table.column", or bare "column" — the same precedence
+ * the distribution and per-column override lookups use. Undefined when the
+ * column has no configured rate (the caller then applies the default).
+ */
+export function resolveNullRate(
+  table: TableInfo,
+  colName: string,
+  nullRates: Record<string, number> = {},
+): number | undefined {
+  return (
+    nullRates[`${table.name}.${colName}`] ??
+    nullRates[`${table.key}.${colName}`] ??
+    nullRates[colName]
+  );
+}
+
 function valueForColumn(
   table: TableInfo,
   col: ColumnInfo,
   gens: Map<string, Generator>,
+  nullRates: Map<string, number>,
   faker: Faker,
   fkSamplers: Map<ForeignKey, Sampler<Row>>,
   fkParents: Map<ForeignKey, Row | null>,
@@ -491,7 +520,7 @@ function valueForColumn(
     col.nullable &&
     !isInAnyUnique(table, col.name) &&
     !table.partition?.keyColumns.includes(col.name) &&
-    faker.datatype.boolean({ probability: NULL_PROBABILITY })
+    faker.datatype.boolean({ probability: nullRates.get(col.name) ?? NULL_PROBABILITY })
   ) {
     return null;
   }

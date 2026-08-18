@@ -4,6 +4,28 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] — 2026-08-18
+
+### Added
+
+- **`--null-rate` controls how often a nullable column is left `NULL`, per
+  column.** Nullable columns were nulled at a single fixed rate for every column,
+  so generated data lost the shape real tables have — a `deleted_at` that's empty
+  on nearly every live row, an optional `middle_name` present maybe a third of
+  the time, a `notes` column that's always filled. `--null-rate <col>=<0..1>` now
+  sets that fraction per column: `--null-rate users.middle_name=0.7
+  orders.deleted_at=1 users.notes=0` leaves 70% of middle names empty, every
+  `deleted_at` `NULL`, and every `notes` populated. Columns are matched by
+  `table.column`, `schema.table.column`, or a bare `column` — the same precedence
+  `--distribution` and `--column` use — and the rate applies only where a `NULL`
+  is already valid: `NOT NULL`, primary-key/unique, partition-key, and
+  foreign-key columns are untouched (an FK still points at a real parent). The
+  same knob is a `nullRates` map in the config file and a `nullRates` field on the
+  programmatic `seed()` API; out-of-range rates are rejected up front alongside
+  the existing temporal/locale validation. A run that configures no rate is
+  byte-identical to before under `--seed`, so nothing changes for anyone not
+  opting in.
+
 ## [0.16.0] — 2026-08-15
 
 ### Added
