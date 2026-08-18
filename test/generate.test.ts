@@ -51,6 +51,45 @@ test("synthetic integer identity PKs are assigned 1..N", () => {
   assert.deepEqual(ids, [1, 2, 3, 4]);
 });
 
+function usersWithBio(): Schema {
+  const users = table("users", {
+    columns: [idCol(), col("email", { udtName: "text" }), col("bio", { udtName: "text", nullable: true })],
+    primaryKey: ["id"],
+    uniques: [["email"]],
+  });
+  return schema(users);
+}
+
+test("null rate 1 leaves a nullable column NULL on every row", () => {
+  const data = build(usersWithBio(), { rows: { users: 30 }, nullRates: { "users.bio": 1 }, seed: 1 });
+  const bios = rowsFor(data, "public.users").map((r) => r.bio);
+  assert.ok(bios.every((b) => b === null), "expected every bio to be NULL");
+});
+
+test("null rate 0 fills a nullable column on every row", () => {
+  const data = build(usersWithBio(), { rows: { users: 30 }, nullRates: { "users.bio": 0 }, seed: 1 });
+  const bios = rowsFor(data, "public.users").map((r) => r.bio);
+  assert.ok(bios.every((b) => b !== null), "expected no bio to be NULL");
+});
+
+test("null rate resolves by bare column name too", () => {
+  const data = build(usersWithBio(), { rows: { users: 20 }, nullRates: { bio: 1 }, seed: 1 });
+  const bios = rowsFor(data, "public.users").map((r) => r.bio);
+  assert.ok(bios.every((b) => b === null), "expected bare-name null rate to apply");
+});
+
+test("a NOT NULL column ignores a configured null rate", () => {
+  const data = build(usersWithBio(), { rows: { users: 20 }, nullRates: { "users.email": 1 }, seed: 1 });
+  const emails = rowsFor(data, "public.users").map((r) => r.email);
+  assert.ok(emails.every((e) => e !== null), "NOT NULL column must never be nulled");
+});
+
+test("an unconfigured null rate leaves default output byte-identical", () => {
+  const base = build(usersWithBio(), { rows: { users: 25 }, seed: 9 });
+  const withEmpty = build(usersWithBio(), { rows: { users: 25 }, nullRates: {}, seed: 9 });
+  assert.deepEqual(withEmpty, base);
+});
+
 test("unique constraints are never violated within a table", () => {
   const data = build(usersAndOrders(), { rows: { users: 20 }, seed: 3 });
   const emails = rowsFor(data, "public.users").map((r) => r.email);

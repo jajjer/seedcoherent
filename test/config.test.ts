@@ -5,7 +5,14 @@ import { test } from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, parseColumnSpecs, parseLinkGroups, parseRowSpecs } from "../src/config.js";
+import {
+  loadConfig,
+  parseColumnSpecs,
+  parseLinkGroups,
+  parseNullRateSpecs,
+  parseRowSpecs,
+  validateNullRates,
+} from "../src/config.js";
 
 test("parseRowSpecs parses table=count pairs", () => {
   assert.deepEqual(parseRowSpecs(["users=1000", "orders=5000"]), {
@@ -75,6 +82,43 @@ test("parseColumnSpecs rejects specs without '=', empty sides, and empty value l
 
 test("parseColumnSpecs handles an empty list", () => {
   assert.deepEqual(parseColumnSpecs([]), {});
+});
+
+test("parseNullRateSpecs parses column=rate pairs, including 0 and 1", () => {
+  assert.deepEqual(parseNullRateSpecs(["users.middle_name=0.7", "orders.deleted_at=1", "notes=0"]), {
+    "users.middle_name": 0.7,
+    "orders.deleted_at": 1,
+    notes: 0,
+  });
+});
+
+test("parseNullRateSpecs splits on the last '=' so schema-qualified names work", () => {
+  assert.deepEqual(parseNullRateSpecs(["public.users.middle_name=0.5"]), {
+    "public.users.middle_name": 0.5,
+  });
+});
+
+test("parseNullRateSpecs rejects bad specs and out-of-range rates", () => {
+  assert.throws(() => parseNullRateSpecs(["users.middle_name"]), /expected column=rate/);
+  assert.throws(() => parseNullRateSpecs(["=0.5"]), /empty column/);
+  assert.throws(() => parseNullRateSpecs(["x=abc"]), /number in \[0, 1\]/);
+  assert.throws(() => parseNullRateSpecs(["x=-0.1"]), /number in \[0, 1\]/);
+  assert.throws(() => parseNullRateSpecs(["x=1.5"]), /number in \[0, 1\]/);
+});
+
+test("parseNullRateSpecs handles an empty list", () => {
+  assert.deepEqual(parseNullRateSpecs([]), {});
+});
+
+test("validateNullRates accepts valid maps and undefined, rejects bad values", () => {
+  assert.doesNotThrow(() => validateNullRates(undefined));
+  assert.doesNotThrow(() => validateNullRates({ "users.x": 0, "users.y": 1, "users.z": 0.3 }));
+  assert.throws(() => validateNullRates({ "users.x": 2 }), /Invalid null rate for "users.x"/);
+  assert.throws(() => validateNullRates({ "users.x": -1 }), /Invalid null rate/);
+  assert.throws(
+    () => validateNullRates({ "users.x": "0.5" as unknown as number }),
+    /Invalid null rate/,
+  );
 });
 
 test("parseLinkGroups splits each flag value into a group on '='", () => {

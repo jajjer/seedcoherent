@@ -47,6 +47,45 @@ export function parseRowSpecs(specs: string[]): Record<string, number> {
 }
 
 /**
+ * Parse repeated `column=rate` CLI flags into a null-rate map. `rate` is a
+ * fraction in [0, 1] — the probability a nullable column is left NULL per row,
+ * e.g. `users.middle_name=0.7` (70% NULL) or `orders.deleted_at=1` (always
+ * NULL). Keyed by "table.column", "schema.table.column", or bare "column".
+ */
+export function parseNullRateSpecs(specs: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const spec of specs) {
+    const eq = spec.lastIndexOf("=");
+    if (eq === -1) throw new Error(`Invalid --null-rate spec "${spec}" (expected column=rate)`);
+    const column = spec.slice(0, eq).trim();
+    if (!column) throw new Error(`Invalid --null-rate spec "${spec}" (empty column)`);
+    const rate = Number(spec.slice(eq + 1));
+    if (!isValidRate(rate)) throw new Error(`Invalid null rate in "${spec}" (need a number in [0, 1])`);
+    out[column] = rate;
+  }
+  return out;
+}
+
+/** True for a finite number in the closed interval [0, 1]. */
+function isValidRate(rate: number): boolean {
+  return Number.isFinite(rate) && rate >= 0 && rate <= 1;
+}
+
+/**
+ * Guard the merged `nullRates` map (CLI flags plus any config-file entries) up
+ * front, so an out-of-range rate — which `parseNullRateSpecs` catches for CLI
+ * input but a raw config file could still carry — fails before any rows build.
+ */
+export function validateNullRates(nullRates?: Record<string, number>): void {
+  if (!nullRates) return;
+  for (const [column, rate] of Object.entries(nullRates)) {
+    if (typeof rate !== "number" || !isValidRate(rate)) {
+      throw new Error(`Invalid null rate for "${column}": ${rate} (need a number in [0, 1])`);
+    }
+  }
+}
+
+/**
  * Parse repeated `column=kind[:arg]` CLI flags into a distributions map. The
  * recognized kinds are:
  *   - `uniform` — even spread (the default); takes no argument.

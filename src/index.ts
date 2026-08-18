@@ -14,7 +14,7 @@
  * The schema comes from one of three sources — an inline `ddl` string, a
  * `schemaFile` path, or a live `connection` (introspected read-only). Every
  * generation knob the CLI exposes (rows, seed, locale, since/until, skip,
- * distributions, column overrides) is a field here, and the result can be turned
+ * distributions, null rates, column overrides) is a field here, and the result can be turned
  * back into a runnable SQL script with `.toSQL()`.
  */
 
@@ -22,6 +22,7 @@ import { readFile } from "node:fs/promises";
 import { buildData, requiredUnsupportedColumns, rowCount, type Row, type TableData } from "./generate.js";
 import { dialectByName, dialectFor, type Dialect, type DialectName } from "./dialect.js";
 import { loadSchemaFromDdl } from "./schema-file.js";
+import { validateNullRates } from "./config.js";
 import { topoSort } from "./graph.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
@@ -74,6 +75,13 @@ export interface SeedOptions {
   skip?: string[];
   /** Per-column distributions (FK fan-out or categorical label skew). */
   distributions?: Record<string, DistSpec>;
+  /**
+   * Per-column NULL fraction (0–1) for plain nullable columns:
+   * `{ "users.middle_name": 0.7 }` leaves that column NULL ~70% of the time.
+   * Applies only where a NULL is already valid (not to NOT NULL, unique/PK,
+   * partition-key, or foreign-key columns).
+   */
+  nullRates?: Record<string, number>;
   /** Per-column generator overrides: `{ "users.email": "internet.email" }`. */
   columns?: Record<string, ColumnOverride>;
 }
@@ -126,6 +134,7 @@ export async function seed(options: SeedOptions): Promise<SeedResult> {
     defaultRows: options.defaultRows,
     columns: options.columns,
     distributions: options.distributions,
+    nullRates: options.nullRates,
     skip: options.skip,
     seed: options.seed,
     locale: options.locale,
@@ -133,10 +142,12 @@ export async function seed(options: SeedOptions): Promise<SeedResult> {
     until: options.until,
   };
 
-  // Validate the temporal window and locale up front, exactly as the CLI does,
-  // so a bad since/until or locale fails before we build (or connect to) anything.
+  // Validate the temporal window, locale, and null rates up front, exactly as the
+  // CLI does, so a bad since/until, locale, or rate fails before we build (or
+  // connect to) anything.
   temporalWindow(config);
   resolveLocale(config.locale);
+  validateNullRates(config.nullRates);
 
   const { schema, dialect } = await resolveSchema(options);
   if (schema.tables.size === 0) {
