@@ -17,6 +17,7 @@ import { insertDataSqlite, SqliteSink, toSqlSqlite } from "./sqlite-emit.js";
 import { introspectSqlite } from "./sqlite-introspect.js";
 import { SqliteRowFetcher } from "./sqlite-subset.js";
 import { PgRowFetcher, type RowFetcher } from "./subset.js";
+import { SqlProfiler, type Profiler } from "./profile.js";
 import type { Connection, Schema, TableInfo } from "./types.js";
 
 export type DialectName = "postgres" | "mysql" | "sqlite";
@@ -39,6 +40,8 @@ export interface Dialect {
   defaultSchemas(connStr: string): string[];
   introspect(conn: Connection, schemas: string[]): Promise<Schema>;
   createRowFetcher(conn: Connection): RowFetcher;
+  /** Aggregate-query profiler for learning the shape of existing data (`--profile`). */
+  createProfiler(conn: Connection): Profiler;
   createSink(conn: Connection, opts: SinkOptions): SinkHandle;
   /** Insert already-materialized data (subset path) and return the row count. */
   insertData(conn: Connection, data: TableData[], opts: SinkOptions): Promise<number>;
@@ -71,6 +74,10 @@ const postgresDialect: Dialect = {
   },
   createRowFetcher(conn) {
     return new PgRowFetcher(conn);
+  },
+  createProfiler(conn) {
+    const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    return new SqlProfiler(conn, ident, (t) => `${ident(t.schema)}.${ident(t.name)}`);
   },
   createSink(conn, opts) {
     return new CopySink((conn as PgConnection).client, { truncate: opts.truncate, tables: opts.tables });
@@ -116,6 +123,10 @@ const mysqlDialect: Dialect = {
   },
   createRowFetcher(conn) {
     return new MysqlRowFetcher(conn);
+  },
+  createProfiler(conn) {
+    const ident = (s: string) => "`" + s.replace(/`/g, "``") + "`";
+    return new SqlProfiler(conn, ident, (t) => `${ident(t.schema)}.${ident(t.name)}`);
   },
   createSink(conn, opts) {
     return new MysqlSink(conn, { truncate: opts.truncate, tables: opts.tables }, opts.batchSize);
@@ -172,6 +183,11 @@ const sqliteDialect: Dialect = {
   },
   createRowFetcher(conn) {
     return new SqliteRowFetcher(conn);
+  },
+  createProfiler(conn) {
+    const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    // SQLite reads come from the connection's own (main) database — bare, unqualified.
+    return new SqlProfiler(conn, ident, (t) => ident(t.name));
   },
   createSink(conn, opts) {
     return new SqliteSink(conn, { truncate: opts.truncate, tables: opts.tables }, opts.batchSize);

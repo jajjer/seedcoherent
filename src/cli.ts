@@ -27,6 +27,7 @@ import {
 import { topoSort } from "./graph.js";
 import { buildAppendPlan, buildPlan, buildSubsetPlan, formatPlan } from "./plan.js";
 import { anonymizeAll, collectSubset } from "./subset.js";
+import { buildProfile, formatProfileSummary, mergeProfile } from "./profile.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
 import type { Config, OutputFormat, TableInfo } from "./types.js";
@@ -66,6 +67,14 @@ program
     "--null-rate <spec...>",
     "fraction (0-1) of rows a nullable column is left NULL, e.g. users.middle_name=0.7 or orders.deleted_at=1",
     [],
+  )
+  .option(
+    "--profile",
+    "sample the existing data and match its shape: derive per-column null rates, categorical value weights, FK fan-out skew, and the timestamp window, then generate to match (your own flags still win)",
+  )
+  .option(
+    "--profile-out <file>",
+    "write the config derived by profiling to a JSON file and exit (no generation); reuse it later with --config",
   )
   .option("-c, --config <path>", "path to a config file")
   .option(
@@ -190,6 +199,33 @@ program
         program.error("--append adds rows to existing data; --truncate would delete it first.");
       }
 
+      // Profiling learns the shape of the existing data and folds it into the
+      // config *beneath* the user's explicit flags. --profile-out dumps that
+      // derived config and exits; plain --profile continues into generation
+      // (composes with --append). It's incompatible with --subset, which copies
+      // real rows rather than generating fresh ones.
+      if ((opts.profile || opts.profileOut) && isSubset) {
+        program.error(
+          "--profile generates fresh rows shaped like existing data; --subset copies real rows. Use one at a time.",
+        );
+      }
+      if (opts.profile || opts.profileOut) {
+        const { config: profiled, summary } = await buildProfile(
+          schema,
+          order,
+          config,
+          dialect.createProfiler(client),
+        );
+        if (opts.profileOut) {
+          await writeFile(opts.profileOut, JSON.stringify(profiled, null, 2) + "\n", "utf8");
+          console.error(formatProfileSummary(summary));
+          console.error(`\n✓ Wrote derived config to ${opts.profileOut}`);
+          return;
+        }
+        mergeProfile(config, profiled);
+        console.error(formatProfileSummary(summary) + "\n");
+      }
+
       // Append grows only the tables named via --rows; nothing to do otherwise.
       let appendCtx: AppendContext | undefined;
       if (isAppend) {
@@ -310,6 +346,9 @@ program
  */
 async function runOffline(opts: any, config: Config, format: OutputFormat): Promise<void> {
   if (opts.append) program.error("--append needs a live database; it can't run against --schema-file.");
+  if (opts.profile || opts.profileOut) {
+    program.error("--profile learns from a populated database; it has no data to read with --schema-file.");
+  }
   if (opts.subset.length > 0) program.error("--subset needs a live database; it can't run against --schema-file.");
   if (opts.to) program.error("--to needs a live database; it can't run against --schema-file.");
   if (opts.truncate) program.error("--truncate needs a live database; it has no effect with --schema-file.");
