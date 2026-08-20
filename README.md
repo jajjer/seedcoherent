@@ -69,6 +69,15 @@ everything and inserts in dependency order inside a single transaction.
   keys reference the rows already there, and synthetic ids continue past the
   current max so nothing collides. "Add 5,000 orders to my existing users" is one
   flag.
+- **Learns the shape of your real data.** The knobs above all match production —
+  *if* you spell each one out. `--profile` reads the shape straight from a
+  populated database instead: it samples the existing rows and derives the
+  per-column NULL fractions, the categorical value weights (a `status` that's 85%
+  `active`), the foreign-key fan-out skew, and the timestamp window — then
+  generates fresh, fully synthetic rows that match. "Make me 100k rows that look
+  like production, but fake" is one flag; your own flags still win over anything
+  profiled, and `--profile-out config.json` writes the derived config out to
+  inspect, edit, and reuse. Reads only — it never writes to the profiled database.
 - **Temporally coherent.** Timestamps respect causality. A row's `updated_at`,
   `last_login`, or `expires_at` never predates its `created_at`, and a child's
   `created_at` never predates the parent it points at — so an order can't be
@@ -144,6 +153,14 @@ npx seedcoherent $DATABASE_URL --rows users=1000 \
   --column users.email=internet.email \
   --column users.plan=values:free,pro,enterprise \
   --column users.country=value:Canada
+
+# Match production's shape automatically — learn null rates, value weights, FK
+# fan-out skew, and the timestamp window from the live data, then generate to fit
+npx seedcoherent $DATABASE_URL --profile --rows users=1000 orders=20000 -o seed.sql
+
+# Or capture the derived config to inspect / edit / reuse (no rows generated)
+npx seedcoherent $DATABASE_URL --profile-out prod-shape.json
+npx seedcoherent --schema-file schema.sql --config prod-shape.json --rows users=1000 -o seed.sql
 ```
 
 Connection string comes from the first argument or `DATABASE_URL`. A
@@ -221,6 +238,8 @@ Sample rows:
 | `--distribution <col=kind...>` | Skew a column: FK fan-out (`orders.user_id=zipf`, `…=zipf:2`) or a value column's labels (`orders.status=zipf`, `orders.status=weighted:paid=0.9,refunded=0.1`); default `uniform` |
 | `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
 | `--null-rate <col=rate...>` | Fraction (0–1) of rows a nullable column is left `NULL`, e.g. `users.middle_name=0.7` or `orders.deleted_at=1` (see below) |
+| `--profile` | Learn the shape of the existing data — null rates, value weights, FK fan-out, timestamp window — and generate to match (see below) |
+| `--profile-out <file>` | Write the config derived by profiling to a JSON file and exit, no generation (see below) |
 | `-c, --config <path>` | Config file (see below) |
 | `--schema-file <path>` | Read the schema from a `.sql`/DDL file instead of a live database (needs `-o`/`--print`/`--dry-run`; see below) |
 | `--dialect <name>` | Engine for `--schema-file`: parses that DDL grammar and emits that SQL flavor — `postgres` (default), `mysql`, or `sqlite` |
@@ -364,6 +383,56 @@ result.toSQL();    // a runnable SQL script; pass "mysql" | "sqlite" to change t
 across schemas is keyed by its full `schema.name` instead. The same up-front
 validation the CLI does — the temporal window, the locale, and any required
 column of a type it can't synthesize — throws before any rows are generated.
+
+## Profile: match your real data's shape
+
+The distribution, null-rate, and time-window flags all bend generated data toward
+what production looks like — but only once you've measured production and typed
+each number in. `--profile` measures it for you. Point it at a **populated**
+database and, right after reading the schema, it samples the existing rows and
+derives the matching config:
+
+- **Null rates** — the real fraction of each nullable column that's `NULL`.
+- **Categorical weights** — for every low-cardinality value column (an enum, a
+  boolean, a `status`/`plan`/`tier`), the observed value spread, as a `weighted`
+  distribution. High-cardinality columns (emails, names, ids) are left alone.
+- **FK fan-out** — how lopsidedly children point at parents. When the spread
+  follows a power law, it's emitted as a `zipf` distribution with the fitted skew;
+  an even spread is left `uniform`.
+- **Time window** — the real min/max of creation timestamps → `--since`/`--until`.
+
+Then it generates fresh, fully synthetic rows shaped like that:
+
+```bash
+# Read prod's shape, generate 20k coherent orders that match it, write a .sql file.
+npx seedcoherent $PROD_URL --profile --rows users=1000 orders=20000 -o seed.sql
+```
+
+Profiling is **read-only** — it runs aggregate `SELECT`s and never writes to the
+source. It layers *beneath* your own settings: any `--distribution`,
+`--null-rate`, `--since`/`--until`, `--column`, or config-file entry you supply
+wins, and profiling only fills what you left unspecified. It composes with
+`--append` (grow existing tables in their own current shape) but not with
+`--subset` (which copies real rows rather than generating fresh ones), and it
+needs a live database, so it can't run against `--schema-file`.
+
+To capture the derived config instead of generating, use `--profile-out <file>`.
+It writes the config as JSON and exits — nothing is generated — so you can read
+exactly what was inferred, edit it, and reuse it later with `--config` (even
+offline against a `--schema-file`):
+
+```bash
+npx seedcoherent $PROD_URL --profile-out prod-shape.json
+# → { "distributions": { "public.orders.status": { "kind": "weighted", … } },
+#     "nullRates": { "public.users.middle_name": 0.7, … },
+#     "since": "2023-01-05T…", "until": "2024-11-20T…" }
+
+npx seedcoherent --schema-file schema.sql --config prod-shape.json \
+  --rows users=1000 orders=20000 -o seed.sql
+```
+
+Because the derived config is just the ordinary knobs, unseeded runs stay
+byte-identical for anyone not passing `--profile`.
 
 ## Subset + anonymize real data
 

@@ -4,6 +4,36 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] — 2026-08-20
+
+### Added
+
+- **`--profile` learns the shape of an existing database and generates data to
+  match it — no more hand-tuning every knob.** The distribution, null-rate, and
+  temporal flags each bend generated data toward production, but only once you've
+  measured production and typed each number in yourself. `--profile` measures it
+  for you: pointed at a *populated* database, it samples the existing rows right
+  after reading the schema and derives the matching config — the real per-column
+  `NULL` fraction of every nullable column; the observed value spread of every
+  low-cardinality categorical column (an enum, a boolean, a `status`/`plan`), as a
+  `weighted` distribution; the foreign-key fan-out skew, emitted as a `zipf`
+  distribution when the children-per-parent spread follows a power law (fitted by
+  least-squares on the log rank/frequency curve) and left `uniform` when it
+  doesn't; and the real min/max of creation timestamps as the `--since`/`--until`
+  window. It then generates fresh, fully synthetic rows shaped like that — "make
+  me 100k rows that look like production, but fake" is one flag. High-cardinality
+  columns (emails, names, ids) are never weighted, so no real values leak into the
+  output. Profiling is **read-only** (aggregate `SELECT`s only; it never writes to
+  the source) and layers *beneath* your own settings — any `--distribution`,
+  `--null-rate`, `--since`/`--until`, `--column`, or config-file entry you pass
+  wins, and profiling fills only what you left unspecified. It composes with
+  `--append` and works on Postgres, MySQL, and SQLite; it's rejected against
+  `--schema-file` (no data to read) and `--subset` (a different mode). A companion
+  `--profile-out <file>` writes the derived config to JSON and exits without
+  generating, so the inferred shape is inspectable, editable, and reusable later
+  via `--config` — even offline against a `--schema-file`. Unseeded runs stay
+  byte-identical for anyone not opting in.
+
 ## [0.17.0] — 2026-08-18
 
 ### Added
