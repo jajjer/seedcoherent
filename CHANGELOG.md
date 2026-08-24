@@ -4,6 +4,27 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] — 2026-08-23
+
+### Fixed
+
+- **MySQL now honors `CHECK (col IN (...))` constraints, so generated rows stop
+  violating the one CHECK shape MySQL users reach for most.** Membership checks
+  are how an enum-like text column pins its domain without an `ENUM` type —
+  `CHECK (status IN ('open','closed'))`, `CHECK (tier IN ('free','pro'))`. The
+  shared check parser only recognized the Postgres-normalized form
+  (`col = ANY (ARRAY[...])`); SQLite quietly rewrote its native `IN`-lists into
+  that shape first, but MySQL didn't, so a MySQL `IN`-list check was read from
+  `information_schema` and then silently dropped. The generator, seeing no
+  constraint, drew arbitrary strings — and MySQL 8.0.16+ rejected the insert.
+  The `IN`-to-`ANY(ARRAY[...])` rewrite is now a single shared step both engines
+  run, so a MySQL membership check lands in the same code path as Postgres and
+  SQLite: the generator draws only from the allowed set. Numeric-range and
+  length checks were already honored and are unchanged; this closes the
+  membership gap. It applies to live MySQL introspection and to the MySQL
+  `--schema-file` DDL path. Runs against schemas without MySQL `IN`-list checks
+  are byte-identical to before under `--seed`.
+
 ## [0.18.0] — 2026-08-20
 
 ### Added

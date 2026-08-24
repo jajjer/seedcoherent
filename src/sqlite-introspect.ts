@@ -1,5 +1,6 @@
 /** Reads a live SQLite schema into our internal representation via PRAGMAs + sqlite_master. */
 
+import { rewriteInLists } from "./checks.js";
 import type { ColumnInfo, Connection, ForeignKey, Schema, TableInfo } from "./types.js";
 
 /**
@@ -55,26 +56,6 @@ export function normalizeSqliteCheck(expr: string): string {
     .replace(/`((?:[^`]|``)*)`/g, (_, id: string) => `"${id.replace(/``/g, "`")}"`)
     .replace(/\[([^\]]*)\]/g, (_, id: string) => `"${id}"`);
   return rewriteInLists(requoted);
-}
-
-/** Turn `<operand> IN (<list>)` into `<operand> = ANY (ARRAY[<list>])`, top-level and nested. */
-function rewriteInLists(s: string): string {
-  const re = /\bIN\s*\(/gi;
-  let out = "";
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) {
-    const open = m.index + m[0].length - 1; // index of '('
-    const close = matchingParen(s, open);
-    if (close === -1) continue;
-    const inner = s.slice(open + 1, close);
-    // A subquery (contains SELECT) isn't a value list — leave it be.
-    if (/\bselect\b/i.test(inner)) continue;
-    out += s.slice(last, m.index) + `= ANY (ARRAY[${rewriteInLists(inner)}])`;
-    last = close + 1;
-    re.lastIndex = close + 1;
-  }
-  return out + s.slice(last);
 }
 
 /** Index of the `)` matching the `(` at `open`, or -1. */

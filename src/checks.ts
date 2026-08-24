@@ -14,6 +14,33 @@
 
 import type { CheckConstraint, ColumnCheck } from "./types.js";
 
+/**
+ * Rewrite native `<expr> IN (v1, v2, ...)` value lists into the Postgres
+ * `<expr> = ANY (ARRAY[v1, v2, ...])` shape `parseMembership` understands, so a
+ * membership CHECK written the SQL-standard way (MySQL, SQLite, or a DDL file)
+ * lands in the same code path as a Postgres-normalized one. A subquery
+ * (`IN (SELECT ...)`) isn't a value list and is left untouched. Recurses so
+ * nested lists are handled too.
+ */
+export function rewriteInLists(s: string): string {
+  const re = /\bIN\s*\(/gi;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const open = m.index + m[0].length - 1; // index of '('
+    const close = matchingParen(s, open);
+    if (close === -1) continue;
+    const inner = s.slice(open + 1, close);
+    // A subquery (contains SELECT) isn't a value list — leave it be.
+    if (/\bselect\b/i.test(inner)) continue;
+    out += s.slice(last, m.index) + `= ANY (ARRAY[${rewriteInLists(inner)}])`;
+    last = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return out + s.slice(last);
+}
+
 /** Build a column -> bounds map from a table's CHECK constraints. */
 export function parseChecks(checks: CheckConstraint[]): Map<string, ColumnCheck> {
   const out = new Map<string, ColumnCheck>();

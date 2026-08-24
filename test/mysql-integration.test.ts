@@ -33,9 +33,13 @@ const DDL = `
     email      VARCHAR(255) NOT NULL UNIQUE,
     full_name  VARCHAR(255) NOT NULL,
     role       ENUM('admin','member','guest') NOT NULL,
+    -- A non-enum text column whose domain lives in a CHECK (col IN (...)), not
+    -- the type: exercises MySQL IN-list CHECK parsing, distinct from the ENUM above.
+    tier       VARCHAR(16) NOT NULL,
     is_active  TINYINT(1) NOT NULL,
     prefs      JSON,
-    created_at DATETIME NOT NULL
+    created_at DATETIME NOT NULL,
+    CONSTRAINT chk_tier CHECK (tier IN ('free','pro','enterprise'))
   ) ENGINE=InnoDB;
   CREATE TABLE orders (
     id      BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -102,6 +106,8 @@ async function assertValid(users: number, orders: number, items: number) {
 
   // ENUM, tinyint(1) boolean, and CHECK bounds all landed within their domains.
   assert.equal(await count("SELECT count(*) n FROM users WHERE role NOT IN ('admin','member','guest')"), 0);
+  // A non-enum text column constrained only by a CHECK (tier IN (...)).
+  assert.equal(await count("SELECT count(*) n FROM users WHERE tier NOT IN ('free','pro','enterprise')"), 0);
   assert.equal(await count("SELECT count(*) n FROM users WHERE is_active NOT IN (0,1)"), 0);
   assert.equal(await count("SELECT count(*) n FROM orders WHERE status NOT IN ('pending','paid','shipped')"), 0);
   assert.equal(await count("SELECT count(*) n FROM orders WHERE NOT (total > 0)"), 0);
@@ -163,7 +169,7 @@ test("streams generation straight into batched INSERTs across many batches", { s
   // Explicit AUTO_INCREMENT ids were inserted; MySQL advances its counter on its
   // own, so a subsequent DB-assigned insert must not collide with the seeded ids.
   const [res] = await raw.query(
-    "INSERT INTO users (email, full_name, role, is_active, created_at) VALUES ('post@example.com','Post','guest',1,'2025-01-01 00:00:00')",
+    "INSERT INTO users (email, full_name, role, tier, is_active, created_at) VALUES ('post@example.com','Post','guest','free',1,'2025-01-01 00:00:00')",
   );
   assert.ok(Number((res as mysql.ResultSetHeader).insertId) > 100);
 });
