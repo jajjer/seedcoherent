@@ -8,6 +8,7 @@ import {
   normalizeMysqlCheck,
   parseEnumValues,
 } from "../src/mysql-introspect.js";
+import { parseChecks } from "../src/checks.js";
 import type { Connection } from "../src/types.js";
 
 const cat = (dt: string, ct = dt, en: string[] | null = null) => categorizeMysql(dt, ct, en);
@@ -63,12 +64,18 @@ test("parseEnumValues extracts labels, handles doubled quotes, ignores non-enums
   assert.equal(parseEnumValues("varchar(255)"), null);
 });
 
-test("normalizeMysqlCheck rewrites backticks and strips charset introducers", () => {
+test("normalizeMysqlCheck rewrites backticks, strips charset introducers, and rewrites IN-lists", () => {
   assert.equal(normalizeMysqlCheck("(`price` > 0)"), '("price" > 0)');
   assert.equal(
     normalizeMysqlCheck("(`status` in (_utf8mb4'a',_utf8mb4'b'))"),
-    `("status" in ('a','b'))`,
+    `("status" = ANY (ARRAY['a','b']))`,
   );
+});
+
+test("a MySQL IN-list CHECK parses into a membership set the generator can draw from", () => {
+  const norm = normalizeMysqlCheck("(`status` in (_utf8mb4'active',_utf8mb4'inactive',_utf8mb4'closed'))");
+  const bounds = parseChecks([{ expr: norm }]).get("status");
+  assert.deepEqual(bounds?.in, ["active", "inactive", "closed"]);
 });
 
 /** A Connection stub that answers each information_schema query from fixtures. */
