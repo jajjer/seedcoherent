@@ -89,6 +89,15 @@ everything and inserts in dependency order inside a single transaction.
   `city` both land inside its row's `state` with `country` set to match — no
   California ZIPs (or San Franciscos) on Texas rows. `billing_*` and `shipping_*`
   blocks are kept independent.
+- **Status-coherent.** A lifecycle `status` column agrees with the event
+  timestamps it implies. When a `status`/`state` column has a bounded set of
+  labels (an enum, or a `CHECK (status IN (...))`), each label maps onto the
+  timestamp that records reaching it — `shipped` → `shipped_at`, `cancelled` →
+  `cancelled_at` — using the label declaration order as the lifecycle. A
+  `delivered` order has both `shipped_at` and `delivered_at` set (dated after it
+  was created); a `pending` one has neither. "Branch" states that abort the flow
+  (cancelled, refunded, rejected, …) set their own marker without implying the
+  progress states ran.
 - **Deterministic.** `--seed 42` gives byte-identical output every run.
 - **Preview before you write.** `--dry-run` prints the table order, row counts,
   and a few sample rows without touching the database. It works for subset +
