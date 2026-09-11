@@ -4,6 +4,33 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] — 2026-09-10
+
+### Added
+
+- **Status coherence: a lifecycle `status` column now agrees with the event
+  timestamps it implies, so a `pending` order stops carrying a `delivered_at` and
+  a `cancelled` one always has its `cancelled_at`.** Every date/timestamp column
+  was drawn independently of the status column, so a row could come out
+  constraint-valid but nonsensical — `status = 'pending'` with a non-null
+  `shipped_at`, or `status = 'cancelled'` with a null `cancelled_at`. Like the
+  temporal and intra-row coherence passes, this runs automatically as a post-pass
+  over each generated row: when a `status`/`state`/`phase`/`stage` column has a
+  bounded label domain (a Postgres/MySQL enum, or a `CHECK (col IN (...))`), each
+  label is mapped onto the date/timestamp column that marks reaching it
+  (`shipped` → `shipped_at`, `cancelled` → `cancelled_at`; the shortened
+  `ship_date` form is matched too). The label declaration order is read as the
+  lifecycle, so a `delivered` order has both `shipped_at` and `delivered_at` set
+  (each dated at or after the row's creation time from the temporal pass), while
+  a `pending` one has neither. "Branch" states that abort the flow (cancelled,
+  refunded, rejected, failed, …) are recognized separately: on a branch state its
+  own marker is set and the sibling branches' markers are cleared, but the
+  progress markers are left as generated, since how far the row advanced before
+  aborting is unknowable. A marker that is `NOT NULL` can't be cleared and is left
+  as-is; user-pinned (`--column`) and partition-key columns are never touched.
+  Draws come from a dedicated seeded Faker stream, so schemas without a
+  status-plus-marker shape are byte-identical to before under `--seed`.
+
 ## [0.18.1] — 2026-08-23
 
 ### Fixed

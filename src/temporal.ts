@@ -124,7 +124,8 @@ export function timestampMs(v: unknown): number | null {
   return null;
 }
 
-function fromMs(ms: number, dateOnly: boolean): unknown {
+/** Render epoch ms as a "YYYY-MM-DD" string (date) or a Date (timestamp). */
+export function fromMs(ms: number, dateOnly: boolean): unknown {
   const d = new Date(ms);
   return dateOnly ? d.toISOString().slice(0, 10) : d;
 }

@@ -19,6 +19,7 @@ import {
   timestampMs,
   type TemporalPlan,
 } from "./temporal.js";
+import { applyStatus, planStatus } from "./status.js";
 import type { Config, ColumnInfo, ColumnOverride, ForeignKey, Schema, TableInfo } from "./types.js";
 
 export type Row = Record<string, unknown>;
@@ -173,9 +174,13 @@ export function* streamData(
   // plain `en`). Keeping it off the main faker leaves every non-coherence
   // column's seeded output byte-identical.
   const cohFaker = new Faker({ locale: locale.coherence });
+  // A third instance drives the status-coherence pass (event-marker timestamps).
+  // Its own stream leaves the main and coherence RNG output byte-identical.
+  const statusFaker = new Faker({ locale: locale.main });
   if (config.seed !== undefined) {
     faker.seed(config.seed);
     cohFaker.seed(config.seed);
+    statusFaker.seed(config.seed);
     // Date generators reference "now" by default; pin it so seeded runs are
     // fully reproducible.
     faker.setDefaultRefDate("2025-01-01T00:00:00.000Z");
@@ -250,6 +255,10 @@ export function* streamData(
     // Intra-row coherence plan (names/addresses that should agree). Only columns
     // the generator owns are rewritten — `gens` excludes FK-driven columns.
     const cplan = planCoherence(table);
+    // Status coherence plan: a lifecycle-state column and the event-marker
+    // timestamps its labels imply (shipped → shipped_at). Reuses the CHECK bounds
+    // already parsed above to spot `status IN (...)` domains.
+    const splan = planStatus(table, checks);
     const partitionKeys = new Set(table.partition?.keyColumns ?? []);
     const frozen = (colName: string) =>
       partitionKeys.has(colName) || isOverridden(table, colName, config.columns);
@@ -301,6 +310,14 @@ export function* streamData(
         // participates in the collision test.
         if (cplan) {
           applyCoherence(cplan, candidate, cohFaker, coherenceEligible, frozen, locale.usAddress);
+        }
+        // Make event-marker timestamps agree with the row's status (shipped_at set
+        // once shipped, cleared while pending). Runs after temporal so a filled
+        // marker can be floored at the settled creation time.
+        if (splan) {
+          const createdCol = createdColOf.get(table.key);
+          const createdMs = createdCol ? timestampMs(candidate[createdCol]) : null;
+          applyStatus(splan, candidate, createdMs, window, statusFaker, coherenceEligible, frozen);
         }
         // Check every unique constraint.
         const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join("\u0001"));
