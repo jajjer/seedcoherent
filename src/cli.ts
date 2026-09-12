@@ -30,7 +30,7 @@ import { anonymizeAll, collectSubset } from "./subset.js";
 import { buildProfile, formatProfileSummary, mergeProfile } from "./profile.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
-import type { Config, OutputFormat, TableInfo } from "./types.js";
+import type { Config, OnConflict, OutputFormat, TableInfo } from "./types.js";
 import type { TableData } from "./generate.js";
 
 const program = new Command();
@@ -93,6 +93,10 @@ program
     "--format <name>",
     "output format for -o/--print: sql (default), csv, or ndjson. csv/ndjson write one file per table into the -o <dir> directory",
   )
+  .option(
+    "--on-conflict <action>",
+    "make the generated SQL re-runnable against a populated DB: skip rows that collide with an existing primary/unique key (Postgres ON CONFLICT DO NOTHING, MySQL INSERT IGNORE, SQLite INSERT OR IGNORE). action: skip. --format sql only",
+  )
   .option("-o, --out <file>", "write SQL to a file (or, with --format csv/ndjson, one file per table into this directory) instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
   .option("--dry-run", "preview the plan (table order, row counts, sample rows) without writing")
@@ -137,6 +141,7 @@ program
       until: opts.until ?? fileConfig.until,
       batchSize: opts.batchSize ?? fileConfig.batchSize,
       format: opts.format ?? fileConfig.format,
+      onConflict: opts.onConflict ?? fileConfig.onConflict,
       skip: [...(fileConfig.skip ?? []), ...opts.skip],
       distributions: { ...fileConfig.distributions, ...parseDistSpecs(opts.distribution) },
       nullRates: { ...fileConfig.nullRates, ...parseNullRateSpecs(opts.nullRate) },
@@ -170,6 +175,27 @@ program
       if (opts.to) program.error(`--format ${format} writes files, not to a database; use --out <dir> instead of --to.`);
       if (opts.truncate) program.error(`--truncate has no meaning with --format ${format}; it only writes files.`);
       if (!opts.out) program.error(`--format ${format} needs an output directory: pass --out <dir>.`);
+    }
+
+    // --on-conflict only rewrites the generated INSERTs, so it needs the SQL
+    // script path: --format sql to a file (--out) or stdout (--print), never a
+    // direct/`--to` live insert (COPY/streamed INSERTs have no skip form here)
+    // or a csv/ndjson file. A dry-run writes nothing, so it skips these checks.
+    if (config.onConflict !== undefined) {
+      if (config.onConflict !== "skip") {
+        program.error(`Unknown --on-conflict '${config.onConflict}'. Use skip.`);
+      }
+      if (!opts.dryRun) {
+        if (format !== "sql") {
+          program.error(`--on-conflict only applies to --format sql; it rewrites the generated INSERTs.`);
+        }
+        if (opts.to) {
+          program.error(`--on-conflict produces a re-runnable SQL script; it can't insert into a --to database.`);
+        }
+        if (!opts.out && !opts.print) {
+          program.error(`--on-conflict produces a re-runnable SQL script; write it with --out <file> or --print instead of inserting directly.`);
+        }
+      }
     }
 
     // Offline mode: build the schema from a DDL file and emit SQL with no DB.
@@ -294,7 +320,7 @@ program
         const data = isSubset
           ? await subsetData()
           : buildData(schema, order, cyclic, config, appendCtx);
-        await writeMaterialized(data, format, opts, dialect, verb, cyclic);
+        await writeMaterialized(data, format, opts, dialect, verb, cyclic, config.onConflict);
       } else if (isSubset) {
         // Never write anonymized rows back into the source; require an explicit target.
         if (!opts.to) {
@@ -412,7 +438,7 @@ async function runOffline(opts: any, config: Config, format: OutputFormat): Prom
   }
 
   const data = buildData(schema, order, cyclic, config);
-  await writeMaterialized(data, format, opts, dialect, "Generated", cyclic);
+  await writeMaterialized(data, format, opts, dialect, "Generated", cyclic, config.onConflict);
 }
 
 /**
@@ -428,6 +454,7 @@ async function writeMaterialized(
   dialect: Dialect,
   verb: string,
   cyclic: Set<string>,
+  onConflict?: OnConflict,
 ): Promise<void> {
   if (format !== "sql") {
     const { rows, files } = await writeTableFiles(data, opts.out, format);
@@ -435,7 +462,7 @@ async function writeMaterialized(
     console.error(`\n✓ Wrote ${rows} rows across ${files} ${format} file(s) to ${opts.out}`);
     return;
   }
-  const sql = dialect.toScript(data);
+  const sql = dialect.toScript(data, { onConflict });
   if (opts.out) {
     const totalRows = data.reduce((n, d) => n + d.rows.length, 0);
     await writeFile(opts.out, sql, "utf8");

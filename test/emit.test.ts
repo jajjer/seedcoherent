@@ -153,3 +153,16 @@ test("toSql skips tables with zero rows", () => {
   const sql = toSql([empty]);
   assert.doesNotMatch(sql, /INSERT INTO/);
 });
+
+test("toSql omits ON CONFLICT by default", () => {
+  assert.doesNotMatch(toSql([usersData()]), /ON CONFLICT/);
+});
+
+test("onConflict: skip appends ON CONFLICT DO NOTHING to each INSERT", () => {
+  const sql = toSql([usersData()], { onConflict: "skip" });
+  // The clause sits after VALUES, before the statement terminator.
+  assert.match(sql, /\)\s*ON CONFLICT DO NOTHING;/);
+  // Still one INSERT for the single table, still transactional.
+  assert.equal(sql.match(/ON CONFLICT DO NOTHING/g)?.length, 1);
+  assert.ok(sql.startsWith("BEGIN;"));
+});

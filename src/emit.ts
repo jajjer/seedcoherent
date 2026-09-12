@@ -7,7 +7,13 @@ import type { Client } from "pg";
 import copyStreams from "pg-copy-streams";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
 import type { RowSink, Row, TableData } from "./generate.js";
-import type { ColumnInfo, TableInfo } from "./types.js";
+import type { ColumnInfo, OnConflict, TableInfo } from "./types.js";
+
+/** Options shared by the three offline SQL-script emitters. */
+export interface ScriptOptions {
+  /** Emit re-runnable inserts that skip rows colliding with existing keys. */
+  onConflict?: OnConflict;
+}
 
 const { from: copyFrom } = copyStreams;
 
@@ -51,8 +57,11 @@ export function sqlLiteral(v: unknown, col: ColumnInfo): string {
 }
 
 /** Build a full, runnable SQL script (wrapped in a transaction). */
-export function toSql(data: TableData[]): string {
+export function toSql(data: TableData[], opts: ScriptOptions = {}): string {
   const parts: string[] = ["BEGIN;", ""];
+  // ON CONFLICT DO NOTHING (no target) skips a row that collides with any
+  // primary/unique key, making the script re-runnable against a populated DB.
+  const conflict = opts.onConflict === "skip" ? " ON CONFLICT DO NOTHING" : "";
 
   for (const { table, rows, columns } of data) {
     if (rows.length === 0) continue;
@@ -64,7 +73,7 @@ export function toSql(data: TableData[]): string {
       const tuple = columns.map((c) => sqlLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + ";");
+    parts.push(values.join(",\n") + conflict + ";");
     parts.push("");
   }
 

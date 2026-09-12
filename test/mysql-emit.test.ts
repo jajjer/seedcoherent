@@ -44,6 +44,14 @@ test("toSqlMysql wraps inserts with FK-check toggles and a transaction", () => {
   assert.match(sql, /INSERT INTO `users` \(`id`, `c`\) VALUES/);
   assert.match(sql, /\(1, 'x'\),\n {2}\(2, 'y'\);/);
   assert.match(sql, /COMMIT;\nSET FOREIGN_KEY_CHECKS=1;$/);
+  assert.doesNotMatch(sql, /INSERT IGNORE/);
+});
+
+test("toSqlMysql with onConflict: skip emits INSERT IGNORE", () => {
+  const t = table("users", { columns: [col("id", { udtName: "int" }), textCol] });
+  const data: TableData[] = [{ table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] }];
+  const sql = toSqlMysql(data, { onConflict: "skip" });
+  assert.match(sql, /INSERT IGNORE INTO `users` \(`id`, `c`\) VALUES/);
 });
 
 /** Records every query the sink issues so we can assert SQL + params. */
