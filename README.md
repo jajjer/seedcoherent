@@ -254,6 +254,7 @@ Sample rows:
 | `--dialect <name>` | Engine for `--schema-file`: parses that DDL grammar and emits that SQL flavor — `postgres` (default), `mysql`, or `sqlite` |
 | `--schema-dialect <name>` | Override the input DDL grammar alone (defaults to `--dialect`), to translate one engine's schema into another's seed SQL |
 | `--format <name>` | Output format for `-o`/`--print`: `sql` (default), `csv`, or `ndjson`; `csv`/`ndjson` write one file per table into the `-o <dir>` directory (see below) |
+| `--on-conflict skip` | Make the generated SQL script re-runnable: skip rows that collide with an existing primary/unique key instead of erroring (`--format sql` only; see below) |
 | `-o, --out <file>` | Write SQL to a file (or, with `--format csv`/`ndjson`, one file per table into this directory) instead of inserting |
 | `--print` | Print SQL to stdout |
 | `--dry-run` | Preview table order, row counts, and sample rows without writing |
@@ -345,6 +346,29 @@ rejected with a pointer to `-o <dir>`. Works with generate, `--schema-file`,
 `--append`, and `--subset` alike. The same option is a `"format"` field in the
 [config file](#config-file). `--format sql` (the default) is unchanged.
 
+### Re-runnable seeds (`--on-conflict skip`)
+
+A generated SQL script is a plain list of `INSERT`s, so applying it twice to the
+same database fails on the second run — the primary/unique keys already exist.
+`--on-conflict skip` rewrites those inserts to *skip* a row whose key is already
+present instead of erroring, so the same seed can be re-applied to a shared or
+long-lived dev database without wiping it first:
+
+```bash
+npx seedcoherent $DATABASE_URL --rows users=1000 orders=5000 --on-conflict skip -o seed.sql
+psql < seed.sql   # run it as many times as you like; existing rows are left untouched
+```
+
+It renders per dialect — Postgres `... VALUES (...) ON CONFLICT DO NOTHING`,
+MySQL `INSERT IGNORE`, SQLite `INSERT OR IGNORE` — and the only action today is
+`skip`. Because it only rewrites the generated statements, it applies to the SQL
+script path alone: pair it with `-o <file>` or `--print` under the default
+`--format sql`. Inserting straight into a live database, `--to`, and
+`csv`/`ndjson` don't produce a script to rewrite, so they're rejected with a
+pointer. The same option is an `"onConflict": "skip"` field in the
+[config file](#config-file), and `{ onConflict: "skip" }` on the library's
+[`.toSQL()`](#use-it-as-a-library).
+
 ## Use it as a library
 
 Everything above is the CLI, but the same generator is importable — so a test
@@ -385,6 +409,7 @@ const result = await seed({ schemaFile: "schema.sql", rows: { users: 10 } });
 result.data;       // { users: Row[], orders: Row[] } — keyed by table for destructuring
 result.tables;     // ordered [{ name, schema, key, columns, rows }, …] in dependency order
 result.toSQL();    // a runnable SQL script; pass "mysql" | "sqlite" to change the flavor
+result.toSQL("postgres", { onConflict: "skip" }); // re-runnable: skip rows that collide with an existing key
 ```
 
 `data` is keyed by bare table name for easy destructuring
@@ -579,6 +604,7 @@ generators or set counts. CLI flags win over the file.
   "seed": 42,
   "locale": "de",
   "format": "csv",
+  "onConflict": "skip",
   "rows": { "users": 1000, "orders": 5000 },
   "skip": ["audit_log"],
   "columns": {

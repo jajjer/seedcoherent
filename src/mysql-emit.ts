@@ -1,6 +1,7 @@
 /** Turns generated TableData into MySQL SQL text or streams it into a live DB. */
 
 import { DEFAULT_BATCH_SIZE } from "./config.js";
+import type { ScriptOptions } from "./emit.js";
 import type { RowSink, Row, TableData } from "./generate.js";
 import type { ColumnInfo, Connection, TableInfo } from "./types.js";
 
@@ -44,14 +45,17 @@ export function mysqlLiteral(v: unknown, col: ColumnInfo): string {
 }
 
 /** Build a full, runnable MySQL script. FK checks are relaxed so any order loads. */
-export function toSqlMysql(data: TableData[]): string {
+export function toSqlMysql(data: TableData[], opts: ScriptOptions = {}): string {
   const parts: string[] = ["SET FOREIGN_KEY_CHECKS=0;", "START TRANSACTION;", ""];
+  // INSERT IGNORE turns a duplicate-key collision into a skipped row (a warning,
+  // not an error), making the script re-runnable against a populated database.
+  const ignore = opts.onConflict === "skip" ? " IGNORE" : "";
 
   for (const { table, rows, columns } of data) {
     if (rows.length === 0) continue;
     const colList = columns.map((c) => IDENT(c.name)).join(", ");
     parts.push(`-- ${table.key}: ${rows.length} rows`);
-    parts.push(`INSERT INTO ${tableRef(table)} (${colList}) VALUES`);
+    parts.push(`INSERT${ignore} INTO ${tableRef(table)} (${colList}) VALUES`);
     const values = rows.map((row) => {
       const tuple = columns.map((c) => mysqlLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;

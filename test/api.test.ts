@@ -64,6 +64,13 @@ test("toSQL renders a runnable script in the source and overridden dialects", as
   assert.match(my, /INSERT INTO `users`/);
 });
 
+test("toSQL onConflict: skip renders the per-dialect skip form", async () => {
+  const result = await seed({ ddl: DDL, rows: { users: 2, orders: 2 }, seed: 3 });
+  assert.match(result.toSQL(undefined, { onConflict: "skip" }), /ON CONFLICT DO NOTHING;/);
+  assert.match(result.toSQL("mysql", { onConflict: "skip" }), /INSERT IGNORE INTO `users`/);
+  assert.match(result.toSQL("sqlite", { onConflict: "skip" }), /INSERT OR IGNORE INTO "users"/);
+});
+
 test("seed reads a schemaFile from disk", async () => {
   const dir = await mkdtemp(join(tmpdir(), "seed-api-"));
   const path = join(dir, "schema.sql");

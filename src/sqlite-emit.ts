@@ -1,6 +1,7 @@
 /** Turns generated TableData into SQLite SQL text or streams it into a live DB. */
 
 import { DEFAULT_BATCH_SIZE } from "./config.js";
+import type { ScriptOptions } from "./emit.js";
 import type { RowSink, Row, TableData } from "./generate.js";
 import type { ColumnInfo, Connection, TableInfo } from "./types.js";
 
@@ -43,14 +44,17 @@ export function sqliteLiteral(v: unknown, col: ColumnInfo): string {
  * (`PRAGMA foreign_keys=OFF`, which must sit outside the transaction) so the
  * script applies regardless of insert order.
  */
-export function toSqlSqlite(data: TableData[]): string {
+export function toSqlSqlite(data: TableData[], opts: ScriptOptions = {}): string {
   const parts: string[] = ["PRAGMA foreign_keys=OFF;", "BEGIN TRANSACTION;", ""];
+  // INSERT OR IGNORE skips a row that violates a primary/unique constraint
+  // instead of aborting, making the script re-runnable against a populated DB.
+  const orIgnore = opts.onConflict === "skip" ? " OR IGNORE" : "";
 
   for (const { table, rows, columns } of data) {
     if (rows.length === 0) continue;
     const colList = columns.map((c) => IDENT(c.name)).join(", ");
     parts.push(`-- ${table.key}: ${rows.length} rows`);
-    parts.push(`INSERT INTO ${tableRef(table)} (${colList}) VALUES`);
+    parts.push(`INSERT${orIgnore} INTO ${tableRef(table)} (${colList}) VALUES`);
     const values = rows.map((row) => {
       const tuple = columns.map((c) => sqliteLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;

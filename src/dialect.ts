@@ -7,7 +7,7 @@
 import pg from "pg";
 import mysql from "mysql2/promise";
 import Database from "better-sqlite3";
-import { CopySink, insertData as insertDataPg, toSql } from "./emit.js";
+import { CopySink, insertData as insertDataPg, toSql, type ScriptOptions } from "./emit.js";
 import type { RowSink, TableData } from "./generate.js";
 import { introspect } from "./introspect.js";
 import { insertDataMysql, MysqlSink, toSqlMysql } from "./mysql-emit.js";
@@ -45,7 +45,7 @@ export interface Dialect {
   createSink(conn: Connection, opts: SinkOptions): SinkHandle;
   /** Insert already-materialized data (subset path) and return the row count. */
   insertData(conn: Connection, data: TableData[], opts: SinkOptions): Promise<number>;
-  toScript(data: TableData[]): string;
+  toScript(data: TableData[], opts?: ScriptOptions): string;
 }
 
 /** Wraps a `pg.Client` as a driver-neutral Connection, keeping the raw client for COPY. */
@@ -88,8 +88,8 @@ const postgresDialect: Dialect = {
       batchSize: opts.batchSize,
     });
   },
-  toScript(data) {
-    return toSql(data);
+  toScript(data, opts) {
+    return toSql(data, opts);
   },
 };
 
@@ -134,8 +134,8 @@ const mysqlDialect: Dialect = {
   insertData(conn, data, opts) {
     return insertDataMysql(conn, data, { truncate: opts.truncate, batchSize: opts.batchSize });
   },
-  toScript(data) {
-    return toSqlMysql(data);
+  toScript(data, opts) {
+    return toSqlMysql(data, opts);
   },
 };
 
@@ -195,8 +195,8 @@ const sqliteDialect: Dialect = {
   insertData(conn, data, opts) {
     return insertDataSqlite(conn, data, { truncate: opts.truncate, batchSize: opts.batchSize });
   },
-  toScript(data) {
-    return toSqlSqlite(data);
+  toScript(data, opts) {
+    return toSqlSqlite(data, opts);
   },
 };
 

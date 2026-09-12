@@ -43,6 +43,14 @@ test("toSqlSqlite disables FK checks and wraps inserts in a transaction", () => 
   assert.match(sql, /INSERT INTO "users" \("id", "c"\) VALUES/);
   assert.match(sql, /\(1, 'x'\),\n {2}\(2, 'y'\);/);
   assert.match(sql, /COMMIT;$/);
+  assert.doesNotMatch(sql, /INSERT OR IGNORE/);
+});
+
+test("toSqlSqlite with onConflict: skip emits INSERT OR IGNORE", () => {
+  const t = table("users", { columns: [col("id", { udtName: "INTEGER" }), textCol] });
+  const data: TableData[] = [{ table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] }];
+  const sql = toSqlSqlite(data, { onConflict: "skip" });
+  assert.match(sql, /INSERT OR IGNORE INTO "users" \("id", "c"\) VALUES/);
 });
 
 /** Records every query the sink issues so we can assert SQL + params. */

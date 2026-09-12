@@ -4,6 +4,26 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] — 2026-09-11
+
+### Added
+
+- **`--on-conflict skip` makes the generated SQL script re-runnable, so the same
+  seed can be applied to a shared or long-lived dev database more than once
+  without wiping it first.** A generated script is a plain list of `INSERT`s, so
+  applying it twice failed on the second run — the primary/unique keys already
+  existed. The new flag rewrites those inserts to skip a row whose key is already
+  present instead of erroring, rendered per dialect: Postgres appends
+  `ON CONFLICT DO NOTHING` after each `VALUES`, MySQL emits `INSERT IGNORE`, and
+  SQLite emits `INSERT OR IGNORE` (the sole action today is `skip`). Because it
+  only rewrites the generated statements, it applies to the SQL-script path
+  alone — pair it with `-o <file>` or `--print` under the default `--format sql`;
+  a direct live insert, `--to`, and `csv`/`ndjson` produce no script to rewrite
+  and are rejected up front with a pointer. Also settable as an
+  `"onConflict": "skip"` field in the config file, and as `{ onConflict: "skip" }`
+  on the library's `.toSQL()`. Output with the flag absent is byte-identical to
+  before.
+
 ## [0.19.0] — 2026-09-10
 
 ### Added

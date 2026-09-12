@@ -166,6 +166,16 @@ export type DistSpec =
  */
 export type OutputFormat = "sql" | "csv" | "ndjson";
 
+/**
+ * How the generated SQL script should treat a row that collides with a key
+ * already in the target database. `skip` makes the INSERTs re-runnable — a row
+ * whose primary/unique key already exists is silently ignored rather than
+ * erroring — rendered per dialect (Postgres `ON CONFLICT DO NOTHING`, MySQL
+ * `INSERT IGNORE`, SQLite `INSERT OR IGNORE`). Applies only to the SQL-script
+ * output path; there is no default (a plain INSERT that errors on conflict).
+ */
+export type OnConflict = "skip";
+
 /** Per-column override supplied by the user via config. */
 export type ColumnOverride =
   | string // a faker path like "internet.email" or "person.firstName"
@@ -229,6 +239,14 @@ export interface Config {
    * directory. Ignored when inserting straight into a live database.
    */
   format?: OutputFormat;
+  /**
+   * Make the generated SQL script (`--format sql` to `--out`/`--print`)
+   * re-runnable: `skip` emits inserts that ignore a row whose primary/unique key
+   * already exists instead of erroring, so the same seed can be applied to a
+   * shared database more than once without wiping it first. Rendered per dialect.
+   * Ignored on the direct-insert, `--to`, and `csv`/`ndjson` paths.
+   */
+  onConflict?: OnConflict;
   /**
    * Subset+anonymize only: columns to scrub even though they are join keys
    * (primary keys, FK columns, or columns an FK references). Naming any one

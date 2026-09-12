@@ -26,10 +26,10 @@ import { validateNullRates } from "./config.js";
 import { topoSort } from "./graph.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
-import type { ColumnOverride, Config, DistSpec, Schema } from "./types.js";
+import type { ColumnOverride, Config, DistSpec, OnConflict, Schema } from "./types.js";
 
 export type { Row } from "./generate.js";
-export type { ColumnOverride, DistSpec } from "./types.js";
+export type { ColumnOverride, DistSpec, OnConflict } from "./types.js";
 export type { DialectName } from "./dialect.js";
 
 /**
@@ -112,8 +112,10 @@ export interface SeedResult {
   /**
    * Render the whole dataset as a runnable SQL script (INSERTs in dependency
    * order). Defaults to the source engine's dialect; pass one to override.
+   * Pass `{ onConflict: "skip" }` to emit re-runnable inserts that ignore rows
+   * colliding with an existing key (rendered per dialect).
    */
-  toSQL(dialect?: DialectName): string;
+  toSQL(dialect?: DialectName, options?: { onConflict?: OnConflict }): string;
 }
 
 /**
@@ -231,9 +233,9 @@ function buildResult(materialized: TableData[], dialect: Dialect): SeedResult {
   return {
     data,
     tables,
-    toSQL(target?: DialectName): string {
+    toSQL(target?: DialectName, options?: { onConflict?: OnConflict }): string {
       const d = target ? dialectByName(target) : dialect;
-      return d.toScript(materialized);
+      return d.toScript(materialized, options);
     },
   };
 }
