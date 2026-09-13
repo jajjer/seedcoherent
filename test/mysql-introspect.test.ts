@@ -78,6 +78,15 @@ test("a MySQL IN-list CHECK parses into a membership set the generator can draw 
   assert.deepEqual(bounds?.in, ["active", "inactive", "closed"]);
 });
 
+test("MySQL 8.4 backslash-escaped IN-list quotes are unfolded to the same membership set", () => {
+  // 8.4 stores the clause as `_latin1\'x\'` (escaped quotes) where 8.0 stored
+  // `_utf8mb4'x'`; both must normalize identically so the domain isn't lost.
+  const norm = normalizeMysqlCheck("(`tier` in (_latin1\\'free\\',_latin1\\'pro\\',_latin1\\'enterprise\\'))");
+  assert.equal(norm, `("tier" = ANY (ARRAY['free','pro','enterprise']))`);
+  const bounds = parseChecks([{ expr: norm }]).get("tier");
+  assert.deepEqual(bounds?.in, ["free", "pro", "enterprise"]);
+});
+
 /** A Connection stub that answers each information_schema query from fixtures. */
 function mockConn(fixtures: {
   tables: any[];

@@ -4,6 +4,21 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] — 2026-09-12
+
+### Fixed
+
+- **MySQL 8.4 `CHECK (col IN (...))` constraints are honored again — the domain
+  had been silently dropped, so generated rows violated the check on insert.**
+  MySQL 8.4 backslash-escapes the quotes in a stored `CHECK_CLAUSE`
+  (`_utf8mb4\'x\'`) where 8.0 stored them bare (`_utf8mb4'x'`), which defeated the
+  charset-introducer strip in the clause normalizer: the `IN (...)` list no longer
+  parsed, the membership set was lost, and a non-enum text column constrained only
+  by a `CHECK` was filled with out-of-domain values that the server (which still
+  enforces the check) then rejected. The normalizer now unfolds the `\<ch>`
+  escapes first, so a clause parses identically on 8.0 and 8.4. Surfaced as CI
+  went red when the `mysql:8` image rolled from 8.0.x to 8.4.x.
+
 ## [0.20.0] — 2026-09-11
 
 ### Added

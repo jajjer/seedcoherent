@@ -101,15 +101,21 @@ function unquote(s: string): string {
 
 /**
  * Rewrite a MySQL CHECK clause into the shape our (Postgres-oriented) check
- * parser understands: backtick identifiers become double-quoted, charset
- * introducers (`_utf8mb4'x'`) are stripped, and `IN (...)` value lists become
- * `= ANY (ARRAY[...])`. This lets common numeric-range, length, and membership
- * bounds carry over; MySQL-only forms (`REGEXP`, function calls) simply don't
- * match and are left unconstrained, same as any expression we can't parse.
+ * parser understands: backtick identifiers become double-quoted, string escapes
+ * are unfolded, charset introducers (`_utf8mb4'x'`) are stripped, and `IN (...)`
+ * value lists become `= ANY (ARRAY[...])`. This lets common numeric-range,
+ * length, and membership bounds carry over; MySQL-only forms (`REGEXP`, function
+ * calls) simply don't match and are left unconstrained, same as any expression
+ * we can't parse.
  */
 export function normalizeMysqlCheck(clause: string): string {
   const requoted = clause
     .replace(/`((?:[^`]|``)*)`/g, (_, id: string) => `"${id.replace(/``/g, "`")}"`)
+    // MySQL 8.4 backslash-escapes the quotes in a stored CHECK_CLAUSE
+    // (`_utf8mb4\'x\'`), where 8.0 stored them bare (`_utf8mb4'x'`). Unfold those
+    // `\<ch>` escapes first so the introducer strip and value-list parse below
+    // see the same shape on both server versions; a no-op on an unescaped clause.
+    .replace(/\\(.)/g, "$1")
     .replace(/_[A-Za-z0-9]+(?=')/g, "");
   return rewriteInLists(requoted);
 }
