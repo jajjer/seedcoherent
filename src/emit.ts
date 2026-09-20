@@ -56,12 +56,28 @@ export function sqlLiteral(v: unknown, col: ColumnInfo): string {
   return `'${String(v).replace(/'/g, "''")}'`;
 }
 
+/**
+ * Build the per-table ON CONFLICT clause for Postgres.
+ * - `skip`   → ON CONFLICT DO NOTHING (no target needed)
+ * - `update` → ON CONFLICT (pk/unique cols) DO UPDATE SET non-key = EXCLUDED.non-key
+ *              Falls back to DO NOTHING when the table has no unique target or no
+ *              updatable columns (all columns are identity/generated/in the key).
+ */
+function pgConflictClause(table: TableInfo, columns: ColumnInfo[], action: OnConflict | undefined): string {
+  if (!action) return "";
+  if (action === "skip") return " ON CONFLICT DO NOTHING";
+  const target = table.primaryKey.length > 0 ? table.primaryKey : (table.uniques[0] ?? []);
+  const targetSet = new Set(target);
+  const setCols = columns
+    .filter((c) => !targetSet.has(c.name) && !c.isIdentity && !c.isGenerated)
+    .map((c) => `${IDENT(c.name)} = EXCLUDED.${IDENT(c.name)}`);
+  if (setCols.length === 0 || target.length === 0) return " ON CONFLICT DO NOTHING";
+  return ` ON CONFLICT (${target.map((n) => IDENT(n)).join(", ")}) DO UPDATE SET ${setCols.join(", ")}`;
+}
+
 /** Build a full, runnable SQL script (wrapped in a transaction). */
 export function toSql(data: TableData[], opts: ScriptOptions = {}): string {
   const parts: string[] = ["BEGIN;", ""];
-  // ON CONFLICT DO NOTHING (no target) skips a row that collides with any
-  // primary/unique key, making the script re-runnable against a populated DB.
-  const conflict = opts.onConflict === "skip" ? " ON CONFLICT DO NOTHING" : "";
 
   for (const { table, rows, columns } of data) {
     if (rows.length === 0) continue;
@@ -73,7 +89,7 @@ export function toSql(data: TableData[], opts: ScriptOptions = {}): string {
       const tuple = columns.map((c) => sqlLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + conflict + ";");
+    parts.push(values.join(",\n") + pgConflictClause(table, columns, opts.onConflict) + ";");
     parts.push("");
   }
 

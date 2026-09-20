@@ -166,3 +166,26 @@ test("onConflict: skip appends ON CONFLICT DO NOTHING to each INSERT", () => {
   assert.equal(sql.match(/ON CONFLICT DO NOTHING/g)?.length, 1);
   assert.ok(sql.startsWith("BEGIN;"));
 });
+
+test("onConflict: update emits ON CONFLICT (pk) DO UPDATE SET non-key cols", () => {
+  // usersData: primaryKey=["id"] (isIdentity=true), columns=[id, email]
+  // target = ["id"]; id is excluded (in target); email → SET clause
+  const sql = toSql([usersData()], { onConflict: "update" });
+  assert.match(sql, /ON CONFLICT \("id"\) DO UPDATE SET "email" = EXCLUDED\."email";/);
+  assert.doesNotMatch(sql, /DO NOTHING/);
+});
+
+test("onConflict: update falls back to DO NOTHING when no updatable columns exist", () => {
+  // A table whose only non-PK column is identity — nothing to SET.
+  const t = table("kv", { columns: [idCol()], primaryKey: ["id"] });
+  const data = [{ table: t, columns: t.columns, rows: [{ id: 1 }] }];
+  const sql = toSql(data, { onConflict: "update" });
+  assert.match(sql, /ON CONFLICT DO NOTHING;/);
+});
+
+test("onConflict: update falls back to DO NOTHING when table has no unique key", () => {
+  const t = table("log", { columns: [col("msg")], primaryKey: [] });
+  const data = [{ table: t, columns: t.columns, rows: [{ msg: "hi" }] }];
+  const sql = toSql(data, { onConflict: "update" });
+  assert.match(sql, /ON CONFLICT DO NOTHING;/);
+});
