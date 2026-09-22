@@ -95,7 +95,7 @@ program
   )
   .option(
     "--on-conflict <action>",
-    "make the generated SQL re-runnable against a populated DB: skip rows that collide with an existing primary/unique key (Postgres ON CONFLICT DO NOTHING, MySQL INSERT IGNORE, SQLite INSERT OR IGNORE). action: skip. --format sql only",
+    "make the generated SQL re-runnable against a populated DB: skip rows that collide with an existing primary/unique key (Postgres ON CONFLICT DO NOTHING, MySQL INSERT IGNORE, SQLite INSERT OR IGNORE), or update the existing row with the new values (Postgres ON CONFLICT (...) DO UPDATE SET, MySQL ON DUPLICATE KEY UPDATE, SQLite ON CONFLICT DO UPDATE SET). action: skip | update. --format sql only",
   )
   .option("-o, --out <file>", "write SQL to a file (or, with --format csv/ndjson, one file per table into this directory) instead of inserting")
   .option("--print", "print SQL to stdout instead of inserting")
@@ -182,8 +182,8 @@ program
     // direct/`--to` live insert (COPY/streamed INSERTs have no skip form here)
     // or a csv/ndjson file. A dry-run writes nothing, so it skips these checks.
     if (config.onConflict !== undefined) {
-      if (config.onConflict !== "skip") {
-        program.error(`Unknown --on-conflict '${config.onConflict}'. Use skip.`);
+      if (!["skip", "update"].includes(config.onConflict)) {
+        program.error(`Unknown --on-conflict '${config.onConflict}'. Use skip or update.`);
       }
       if (!opts.dryRun) {
         if (format !== "sql") {

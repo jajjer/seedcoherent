@@ -53,6 +53,18 @@ test("toSqlSqlite with onConflict: skip emits INSERT OR IGNORE", () => {
   assert.match(sql, /INSERT OR IGNORE INTO "users" \("id", "c"\) VALUES/);
 });
 
+test("toSqlSqlite with onConflict: update emits ON CONFLICT DO UPDATE SET", () => {
+  const t = table("users", {
+    columns: [col("id", { udtName: "INTEGER" }), textCol],
+    primaryKey: ["id"],
+  });
+  const data: TableData[] = [{ table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] }];
+  const sql = toSqlSqlite(data, { onConflict: "update" });
+  // `id` is the PK target → excluded from SET; only `c` is updated
+  assert.match(sql, /ON CONFLICT\("id"\) DO UPDATE SET "c" = excluded\."c"/);
+  assert.doesNotMatch(sql, /INSERT OR IGNORE/);
+});
+
 /** Records every query the sink issues so we can assert SQL + params. */
 class RecordingConn implements Connection {
   calls: { sql: string; params?: unknown[] }[] = [];

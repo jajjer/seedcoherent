@@ -254,7 +254,7 @@ Sample rows:
 | `--dialect <name>` | Engine for `--schema-file`: parses that DDL grammar and emits that SQL flavor — `postgres` (default), `mysql`, or `sqlite` |
 | `--schema-dialect <name>` | Override the input DDL grammar alone (defaults to `--dialect`), to translate one engine's schema into another's seed SQL |
 | `--format <name>` | Output format for `-o`/`--print`: `sql` (default), `csv`, or `ndjson`; `csv`/`ndjson` write one file per table into the `-o <dir>` directory (see below) |
-| `--on-conflict skip` | Make the generated SQL script re-runnable: skip rows that collide with an existing primary/unique key instead of erroring (`--format sql` only; see below) |
+| `--on-conflict skip\|update` | Make the generated SQL script re-runnable: `skip` ignores rows that collide with an existing key; `update` overwrites them (`--format sql` only; see below) |
 | `-o, --out <file>` | Write SQL to a file (or, with `--format csv`/`ndjson`, one file per table into this directory) instead of inserting |
 | `--print` | Print SQL to stdout |
 | `--dry-run` | Preview table order, row counts, and sample rows without writing |
@@ -346,28 +346,45 @@ rejected with a pointer to `-o <dir>`. Works with generate, `--schema-file`,
 `--append`, and `--subset` alike. The same option is a `"format"` field in the
 [config file](#config-file). `--format sql` (the default) is unchanged.
 
-### Re-runnable seeds (`--on-conflict skip`)
+### Re-runnable seeds (`--on-conflict skip | update`)
 
 A generated SQL script is a plain list of `INSERT`s, so applying it twice to the
 same database fails on the second run — the primary/unique keys already exist.
-`--on-conflict skip` rewrites those inserts to *skip* a row whose key is already
-present instead of erroring, so the same seed can be re-applied to a shared or
-long-lived dev database without wiping it first:
+`--on-conflict` rewrites those inserts to handle collisions gracefully, so the
+same seed can be re-applied to a shared or long-lived dev database without wiping
+it first.
+
+**`--on-conflict skip`** leaves the existing row untouched:
 
 ```bash
 npx seedcoherent $DATABASE_URL --rows users=1000 orders=5000 --on-conflict skip -o seed.sql
 psql < seed.sql   # run it as many times as you like; existing rows are left untouched
 ```
 
-It renders per dialect — Postgres `... VALUES (...) ON CONFLICT DO NOTHING`,
-MySQL `INSERT IGNORE`, SQLite `INSERT OR IGNORE` — and the only action today is
-`skip`. Because it only rewrites the generated statements, it applies to the SQL
-script path alone: pair it with `-o <file>` or `--print` under the default
-`--format sql`. Inserting straight into a live database, `--to`, and
-`csv`/`ndjson` don't produce a script to rewrite, so they're rejected with a
-pointer. The same option is an `"onConflict": "skip"` field in the
-[config file](#config-file), and `{ onConflict: "skip" }` on the library's
-[`.toSQL()`](#use-it-as-a-library).
+Postgres emits `ON CONFLICT DO NOTHING`, MySQL `INSERT IGNORE`, SQLite
+`INSERT OR IGNORE`.
+
+**`--on-conflict update`** overwrites the existing row with the new values — a
+true upsert:
+
+```bash
+npx seedcoherent $DATABASE_URL --rows users=1000 orders=5000 --on-conflict update -o seed.sql
+psql < seed.sql   # re-runs refresh existing rows instead of skipping them
+```
+
+The conflict target is the table's primary key (or its first unique constraint as
+a fallback). Non-key, non-generated columns are placed in the SET clause.
+Postgres emits `ON CONFLICT (id) DO UPDATE SET col = EXCLUDED.col, …`, MySQL
+`ON DUPLICATE KEY UPDATE col = VALUES(col), …`, SQLite (3.24+)
+`ON CONFLICT(id) DO UPDATE SET col = excluded.col, …`. When a table has no
+usable conflict target or no updatable columns, the behavior falls back to
+`skip`.
+
+Both actions apply to the SQL-script path alone: pair them with `-o <file>` or
+`--print` under the default `--format sql`. The same option is an
+`"onConflict": "skip"` or `"onConflict": "update"` field in the
+[config file](#config-file), and `{ onConflict: "skip" | "update" }` on the
+library's [`.toSQL()`](#use-it-as-a-library).
 
 ## Use it as a library
 
@@ -409,7 +426,8 @@ const result = await seed({ schemaFile: "schema.sql", rows: { users: 10 } });
 result.data;       // { users: Row[], orders: Row[] } — keyed by table for destructuring
 result.tables;     // ordered [{ name, schema, key, columns, rows }, …] in dependency order
 result.toSQL();    // a runnable SQL script; pass "mysql" | "sqlite" to change the flavor
-result.toSQL("postgres", { onConflict: "skip" }); // re-runnable: skip rows that collide with an existing key
+result.toSQL("postgres", { onConflict: "skip" });   // re-runnable: skip rows that collide with an existing key
+result.toSQL("postgres", { onConflict: "update" }); // re-runnable: overwrite existing rows (upsert)
 ```
 
 `data` is keyed by bare table name for easy destructuring
@@ -604,7 +622,7 @@ generators or set counts. CLI flags win over the file.
   "seed": 42,
   "locale": "de",
   "format": "csv",
-  "onConflict": "skip",
+  "onConflict": "skip",             // or "update" to overwrite existing rows
   "rows": { "users": 1000, "orders": 5000 },
   "skip": ["audit_log"],
   "columns": {

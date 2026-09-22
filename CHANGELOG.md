@@ -4,6 +4,28 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] — 2026-09-18
+
+### Added
+
+- **`--on-conflict update` makes the generated SQL seed a true upsert — a
+  re-run refreshes existing rows with the new values instead of skipping them.**
+  The existing `--on-conflict skip` leaves the original row untouched when a key
+  collision is detected; `update` overwrites it. The conflict target is the
+  table's primary key if it has one, otherwise its first unique constraint.
+  Non-key, non-generated columns are placed in the SET clause; the key columns
+  and any identity/generated columns are omitted (they either triggered the
+  conflict or are server-managed). When the table has no usable conflict target
+  or no updatable columns, the behavior falls back to `skip`. Rendered per
+  dialect: Postgres emits `ON CONFLICT (col, …) DO UPDATE SET col = EXCLUDED.col,
+  …`; MySQL emits `ON DUPLICATE KEY UPDATE col = VALUES(col), …` (no explicit
+  target — MySQL fires on any unique/PK violation); SQLite (3.24+) emits
+  `ON CONFLICT(col, …) DO UPDATE SET col = excluded.col, …` after the VALUES
+  block without the `OR IGNORE` prefix. Like `skip`, `update` applies to the
+  SQL-script path only (`--format sql` with `--out`/`--print`). Also settable as
+  `"onConflict": "update"` in the config file and as `{ onConflict: "update" }`
+  on the library's `.toSQL()`.
+
 ## [0.20.1] — 2026-09-12
 
 ### Fixed

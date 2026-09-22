@@ -54,6 +54,19 @@ test("toSqlMysql with onConflict: skip emits INSERT IGNORE", () => {
   assert.match(sql, /INSERT IGNORE INTO `users` \(`id`, `c`\) VALUES/);
 });
 
+test("toSqlMysql with onConflict: update emits ON DUPLICATE KEY UPDATE for non-PK cols", () => {
+  const t = table("users", {
+    columns: [col("id", { udtName: "int" }), textCol],
+    primaryKey: ["id"],
+  });
+  const data: TableData[] = [{ table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] }];
+  const sql = toSqlMysql(data, { onConflict: "update" });
+  // `id` is in the PK → excluded from SET; only `c` is updated
+  assert.match(sql, /ON DUPLICATE KEY UPDATE `c` = VALUES\(`c`\)/);
+  assert.doesNotMatch(sql, /INSERT IGNORE/);
+  assert.doesNotMatch(sql, /`id` = VALUES\(`id`\)/);
+});
+
 /** Records every query the sink issues so we can assert SQL + params. */
 class RecordingConn implements Connection {
   calls: { sql: string; params?: unknown[] }[] = [];

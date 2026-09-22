@@ -44,6 +44,22 @@ export function mysqlLiteral(v: unknown, col: ColumnInfo): string {
   return `'${escapeString(String(v))}'`;
 }
 
+/**
+ * Build the ON DUPLICATE KEY UPDATE suffix for MySQL.
+ * Excludes PK columns, identity, and generated columns from the SET list since
+ * those either triggered the conflict or are server-managed.
+ * Returns an empty string for `skip` or when no updatable columns remain.
+ */
+function mysqlDupKeyClause(table: TableInfo, columns: ColumnInfo[], action: OnConflict | undefined): string {
+  if (action !== "update") return "";
+  const pkSet = new Set(table.primaryKey);
+  const setCols = columns
+    .filter((c) => !pkSet.has(c.name) && !c.isIdentity && !c.isGenerated)
+    .map((c) => `${IDENT(c.name)} = VALUES(${IDENT(c.name)})`);
+  if (setCols.length === 0) return "";
+  return `\nON DUPLICATE KEY UPDATE ${setCols.join(", ")}`;
+}
+
 /** Build a full, runnable MySQL script. FK checks are relaxed so any order loads. */
 export function toSqlMysql(data: TableData[], opts: ScriptOptions = {}): string {
   const parts: string[] = ["SET FOREIGN_KEY_CHECKS=0;", "START TRANSACTION;", ""];
@@ -60,7 +76,7 @@ export function toSqlMysql(data: TableData[], opts: ScriptOptions = {}): string 
       const tuple = columns.map((c) => mysqlLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + ";");
+    parts.push(values.join(",\n") + mysqlDupKeyClause(table, columns, opts.onConflict) + ";");
     parts.push("");
   }
 

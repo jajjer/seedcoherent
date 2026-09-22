@@ -168,13 +168,14 @@ export type OutputFormat = "sql" | "csv" | "ndjson";
 
 /**
  * How the generated SQL script should treat a row that collides with a key
- * already in the target database. `skip` makes the INSERTs re-runnable — a row
- * whose primary/unique key already exists is silently ignored rather than
- * erroring — rendered per dialect (Postgres `ON CONFLICT DO NOTHING`, MySQL
- * `INSERT IGNORE`, SQLite `INSERT OR IGNORE`). Applies only to the SQL-script
- * output path; there is no default (a plain INSERT that errors on conflict).
+ * already in the target database. `skip` silently ignores the conflicting row
+ * (Postgres `ON CONFLICT DO NOTHING`, MySQL `INSERT IGNORE`, SQLite
+ * `INSERT OR IGNORE`). `update` overwrites the existing row with the new
+ * values (Postgres `ON CONFLICT (...) DO UPDATE SET`, MySQL
+ * `ON DUPLICATE KEY UPDATE`, SQLite `ON CONFLICT(...) DO UPDATE SET`).
+ * Applies only to the SQL-script output path; there is no default.
  */
-export type OnConflict = "skip";
+export type OnConflict = "skip" | "update";
 
 /** Per-column override supplied by the user via config. */
 export type ColumnOverride =

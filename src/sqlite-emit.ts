@@ -40,6 +40,23 @@ export function sqliteLiteral(v: unknown, col: ColumnInfo): string {
 }
 
 /**
+ * Build the per-table ON CONFLICT ... DO UPDATE SET suffix for SQLite (3.24+).
+ * Uses the same target-selection logic as the Postgres emitter: PK first, then
+ * first unique constraint. Returns an empty string when there is no usable
+ * target or no updatable non-key columns (falls back to a plain INSERT).
+ */
+function sqliteConflictClause(table: TableInfo, columns: ColumnInfo[], action: OnConflict | undefined): string {
+  if (action !== "update") return "";
+  const target = table.primaryKey.length > 0 ? table.primaryKey : (table.uniques[0] ?? []);
+  const targetSet = new Set(target);
+  const setCols = columns
+    .filter((c) => !targetSet.has(c.name) && !c.isIdentity && !c.isGenerated)
+    .map((c) => `${IDENT(c.name)} = excluded.${IDENT(c.name)}`);
+  if (setCols.length === 0 || target.length === 0) return "";
+  return `\nON CONFLICT(${target.map((n) => IDENT(n)).join(", ")}) DO UPDATE SET ${setCols.join(", ")}`;
+}
+
+/**
  * Build a full, runnable SQLite script. FK enforcement is disabled for the load
  * (`PRAGMA foreign_keys=OFF`, which must sit outside the transaction) so the
  * script applies regardless of insert order.
@@ -59,7 +76,7 @@ export function toSqlSqlite(data: TableData[], opts: ScriptOptions = {}): string
       const tuple = columns.map((c) => sqliteLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + ";");
+    parts.push(values.join(",\n") + sqliteConflictClause(table, columns, opts.onConflict) + ";");
     parts.push("");
   }
 
