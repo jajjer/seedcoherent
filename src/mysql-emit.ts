@@ -3,7 +3,7 @@
 import { DEFAULT_BATCH_SIZE } from "./config.js";
 import type { ScriptOptions } from "./emit.js";
 import type { RowSink, Row, TableData } from "./generate.js";
-import type { ColumnInfo, Connection, TableInfo } from "./types.js";
+import type { ColumnInfo, Connection, OnConflict, TableInfo } from "./types.js";
 
 const JSON_TYPES = new Set(["json"]);
 
