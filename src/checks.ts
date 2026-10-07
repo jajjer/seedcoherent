@@ -42,7 +42,9 @@ export function rewriteInLists(s: string): string {
 }
 
 /** Build a column -> bounds map from a table's CHECK constraints. */
-export function parseChecks(checks: CheckConstraint[]): Map<string, ColumnCheck> {
+export function parseChecks(
+  checks: CheckConstraint[],
+): Map<string, ColumnCheck> {
   const out = new Map<string, ColumnCheck>();
   for (const { expr } of checks) {
     // Postgres wraps the whole expression (and each conjunct) in parens; peel
@@ -84,7 +86,12 @@ const COMPARATORS = [">=", "<=", "<>", "!=", ">", "<", "="] as const;
 
 function parseClause(clause: string): [string, Partial<ColumnCheck>] | null {
   const inner = stripWrap(clause);
-  return parseMembership(inner) ?? parseLength(inner) ?? parseRegex(inner) ?? parseComparison(inner);
+  return (
+    parseMembership(inner) ??
+    parseLength(inner) ??
+    parseRegex(inner) ??
+    parseComparison(inner)
+  );
 }
 
 /** `<col> ~ '<pattern>'` — a POSIX-regex restriction (common in domain CHECKs). */
@@ -97,7 +104,9 @@ function parseRegex(clause: string): [string, Partial<ColumnCheck>] | null {
 }
 
 /** `<expr> = ANY (ARRAY[lit, lit, ...])` — an IN-list restriction. */
-function parseMembership(clause: string): [string, Partial<ColumnCheck>] | null {
+function parseMembership(
+  clause: string,
+): [string, Partial<ColumnCheck>] | null {
   // Match the left operand and the opening `ARRAY[`, then find its matching
   // `]` — greedily matching to the last `]` would swallow a trailing `::text[]`.
   const m = clause.match(/^(.*?)=\s*ANY\s*\(\s*ARRAY\s*\[/is);
@@ -134,10 +143,13 @@ function parseLength(clause: string): [string, Partial<ColumnCheck>] | null {
 }
 
 /** `<col> <op> <number>` (either operand order) — a numeric range bound. */
-function parseComparison(clause: string): [string, Partial<ColumnCheck>] | null {
+function parseComparison(
+  clause: string,
+): [string, Partial<ColumnCheck>] | null {
   const split = splitOnComparator(clause);
   if (!split) return null;
-  let [left, op, right] = split;
+  const [left, initialOp, right] = split;
+  let op = initialOp;
 
   let column = asColumn(left);
   let value = asNumber(right);
@@ -226,8 +238,10 @@ function mergeCheck(a: ColumnCheck, b: Partial<ColumnCheck>): ColumnCheck {
     out.max = b.max;
     out.maxExclusive = b.maxExclusive;
   }
-  if (b.minLength !== undefined) out.minLength = Math.max(out.minLength ?? 0, b.minLength);
-  if (b.maxLength !== undefined) out.maxLength = Math.min(out.maxLength ?? Infinity, b.maxLength);
+  if (b.minLength !== undefined)
+    out.minLength = Math.max(out.minLength ?? 0, b.minLength);
+  if (b.maxLength !== undefined)
+    out.maxLength = Math.min(out.maxLength ?? Infinity, b.maxLength);
   if (b.pattern !== undefined) out.pattern = b.pattern; // last pattern wins (rare to have two)
   return out;
 }
@@ -240,8 +254,12 @@ function stripWrap(s: string): string {
   do {
     prev = s;
     s = s.trim();
-    if (s.startsWith("(") && matchingParen(s, 0) === s.length - 1) s = s.slice(1, -1);
-    s = s.replace(/::\s*[a-zA-Z_][a-zA-Z0-9_ ]*(\s*\(\s*\d+\s*(,\s*\d+\s*)?\))?(\s*\[\s*\])?$/, "");
+    if (s.startsWith("(") && matchingParen(s, 0) === s.length - 1)
+      s = s.slice(1, -1);
+    s = s.replace(
+      /::\s*[a-zA-Z_][a-zA-Z0-9_ ]*(\s*\(\s*\d+\s*(,\s*\d+\s*)?\))?(\s*\[\s*\])?$/,
+      "",
+    );
   } while (s !== prev);
   return s.trim();
 }
@@ -317,6 +335,9 @@ function parseLiteral(s: string): string | number | null {
 /** Remove a trailing `::type` cast from a single literal token. */
 function stripCast(s: string): string {
   return s
-    .replace(/::\s*[a-zA-Z_][a-zA-Z0-9_ ]*(\s*\(\s*\d+\s*(,\s*\d+\s*)?\))?(\s*\[\s*\])?$/, "")
+    .replace(
+      /::\s*[a-zA-Z_][a-zA-Z0-9_ ]*(\s*\(\s*\d+\s*(,\s*\d+\s*)?\))?(\s*\[\s*\])?$/,
+      "",
+    )
     .trim();
 }

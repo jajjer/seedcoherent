@@ -10,7 +10,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import Database from "better-sqlite3";
 import { introspectSqlite } from "../src/sqlite-introspect.js";
-import { SqliteSink, insertDataSqlite, toSqlSqlite } from "../src/sqlite-emit.js";
+import {
+  SqliteSink,
+  insertDataSqlite,
+  toSqlSqlite,
+} from "../src/sqlite-emit.js";
 import { SqliteRowFetcher } from "../src/sqlite-subset.js";
 import { topoSort } from "../src/graph.js";
 import { buildData, generateInto } from "../src/generate.js";
@@ -46,7 +50,10 @@ function freshDb(): { db: Database.Database; conn: Connection } {
   const db = new Database(":memory:");
   db.exec(SCHEMA_DDL);
   const conn: Connection = {
-    async query<T = any>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    async query<T = any>(
+      sql: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
       const stmt = db.prepare(sql);
       const args = (params ?? []) as unknown[];
       if (stmt.reader) return { rows: stmt.all(...args) as T[] };
@@ -59,7 +66,8 @@ function freshDb(): { db: Database.Database; conn: Connection } {
 }
 
 const ROWS = { users: 20, orders: 60, order_items: 150 };
-const count = (db: Database.Database, sql: string) => Number((db.prepare(sql).get() as any).n);
+const count = (db: Database.Database, sql: string) =>
+  Number((db.prepare(sql).get() as any).n);
 
 /** Assert the generated data is referentially correct and constraint-valid. */
 function assertValid(db: Database.Database) {
@@ -69,21 +77,45 @@ function assertValid(db: Database.Database) {
 
   // Zero orphans across a simple and a composite FK.
   assert.equal(
-    count(db, "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL"),
+    count(
+      db,
+      "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL",
+    ),
     0,
   );
   assert.equal(
-    count(db, "SELECT count(*) n FROM order_items i LEFT JOIN orders o ON o.id=i.order_id WHERE o.id IS NULL"),
+    count(
+      db,
+      "SELECT count(*) n FROM order_items i LEFT JOIN orders o ON o.id=i.order_id WHERE o.id IS NULL",
+    ),
     0,
   );
 
   // Email uniqueness held.
-  assert.equal(count(db, "SELECT count(*)-count(DISTINCT email) n FROM users"), 0);
+  assert.equal(
+    count(db, "SELECT count(*)-count(DISTINCT email) n FROM users"),
+    0,
+  );
 
   // CHECK bounds held: enum-like IN sets and the numeric ranges.
-  assert.equal(count(db, "SELECT count(*) n FROM users WHERE role NOT IN ('admin','member','guest')"), 0);
-  assert.equal(count(db, "SELECT count(*) n FROM orders WHERE NOT (total > 0)"), 0);
-  assert.equal(count(db, "SELECT count(*) n FROM order_items WHERE quantity < 1 OR quantity > 100"), 0);
+  assert.equal(
+    count(
+      db,
+      "SELECT count(*) n FROM users WHERE role NOT IN ('admin','member','guest')",
+    ),
+    0,
+  );
+  assert.equal(
+    count(db, "SELECT count(*) n FROM orders WHERE NOT (total > 0)"),
+    0,
+  );
+  assert.equal(
+    count(
+      db,
+      "SELECT count(*) n FROM order_items WHERE quantity < 1 OR quantity > 100",
+    ),
+    0,
+  );
 }
 
 test("generateInto streams referentially-correct data into a live SQLite DB", async () => {
@@ -96,20 +128,29 @@ test("generateInto streams referentially-correct data into a live SQLite DB", as
 
   const tables = order;
   const sink = new SqliteSink(conn, { truncate: true, tables }, 16); // small batch → many flushes
-  const stats = await generateInto(schema, order, cyclic, { rows: ROWS, seed: 42 }, sink, 16);
+  const stats = await generateInto(
+    schema,
+    order,
+    cyclic,
+    { rows: ROWS, seed: 42 },
+    sink,
+    16,
+  );
 
   assert.equal(sink.inserted, 230);
-  assert.equal(new Map(stats.map((s) => [s.table.name, s.rows])).get("users"), 20);
+  assert.equal(
+    new Map(stats.map((s) => [s.table.name, s.rows])).get("users"),
+    20,
+  );
   assertValid(db);
 
   // Explicit rowid ids were inserted; SQLite still advances its own counter, so
   // a subsequent DB-assigned insert must not collide.
-  const info = db.prepare("INSERT INTO users (email, full_name, role, created_at) VALUES (?,?,?,?)").run(
-    "post@example.com",
-    "Post",
-    "guest",
-    "2025-01-01T00:00:00.000Z",
-  );
+  const info = db
+    .prepare(
+      "INSERT INTO users (email, full_name, role, created_at) VALUES (?,?,?,?)",
+    )
+    .run("post@example.com", "Post", "guest", "2025-01-01T00:00:00.000Z");
   assert.ok(Number(info.lastInsertRowid) > 20);
   db.close();
 });
@@ -145,23 +186,37 @@ test("append adds rows to a populated SQLite DB referencing existing parents", a
   const config = { rows: { orders: 30 }, seed: 42 };
 
   // Grow only orders; users is read for the FK pool, its rows untouched.
-  const ctx = await planAppend(schema, order, config, new SqliteRowFetcher(conn));
+  const ctx = await planAppend(
+    schema,
+    order,
+    config,
+    new SqliteRowFetcher(conn),
+  );
   const grown = order.filter((t) => ctx.generate.has(t.key));
   const sink = new SqliteSink(conn, { truncate: false, tables: grown }, 8);
   const stats = await generateInto(schema, order, cyclic, config, sink, 8, ctx);
 
   // Users were left alone; orders grew by 30 (2 existing + 30 new).
   assert.equal(sink.inserted, 30);
-  assert.equal(new Map(stats.map((s) => [s.table.name, s.rows])).get("orders"), 30);
+  assert.equal(
+    new Map(stats.map((s) => [s.table.name, s.rows])).get("orders"),
+    30,
+  );
   assert.equal(count(db, "SELECT count(*) n FROM users"), 3);
   assert.equal(count(db, "SELECT count(*) n FROM orders"), 32);
 
   // Every order — old and new — points at a real user; no orphans, no dup ids.
   assert.equal(
-    count(db, "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL"),
+    count(
+      db,
+      "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL",
+    ),
     0,
   );
-  assert.equal(count(db, "SELECT count(*)-count(DISTINCT id) n FROM orders"), 0);
+  assert.equal(
+    count(db, "SELECT count(*)-count(DISTINCT id) n FROM orders"),
+    0,
+  );
   // New ids continued past the existing max (10, 11) rather than colliding at 1.
   assert.equal(count(db, "SELECT count(*) n FROM orders WHERE id > 11"), 30);
   db.close();
@@ -185,14 +240,22 @@ test("subset + anonymize pulls a referentially-complete slice into a target DB",
     async query<T = any>(sql: string, params?: unknown[]) {
       const stmt = src.prepare(sql);
       const args = (params ?? []) as unknown[];
-      return { rows: (stmt.reader ? stmt.all(...args) : (stmt.run(...args), [])) as T[] };
+      return {
+        rows: (stmt.reader
+          ? stmt.all(...args)
+          : (stmt.run(...args), [])) as T[],
+      };
     },
     async end() {},
   };
 
   const schema = await introspectSqlite(srcConn, ["main"]);
   const { order } = topoSort(schema);
-  const selected = await collectSubset(schema, { order_items: 2 }, new SqliteRowFetcher(srcConn));
+  const selected = await collectSubset(
+    schema,
+    { order_items: 2 },
+    new SqliteRowFetcher(srcConn),
+  );
   const data = anonymizeAll(schema, order, selected, { seed: 1 });
 
   // Insert the anonymized slice into a fresh target DB.
@@ -202,7 +265,11 @@ test("subset + anonymize pulls a referentially-complete slice into a target DB",
     async query<T = any>(sql: string, params?: unknown[]) {
       const stmt = target.prepare(sql);
       const args = (params ?? []) as unknown[];
-      return { rows: (stmt.reader ? stmt.all(...args) : (stmt.run(...args), [])) as T[] };
+      return {
+        rows: (stmt.reader
+          ? stmt.all(...args)
+          : (stmt.run(...args), [])) as T[],
+      };
     },
     async end() {},
   };
@@ -213,16 +280,26 @@ test("subset + anonymize pulls a referentially-complete slice into a target DB",
   // every FK still resolves in the target.
   assert.equal(count(target, "SELECT count(*) n FROM order_items"), 2);
   assert.equal(
-    count(target, "SELECT count(*) n FROM order_items i LEFT JOIN orders o ON o.id=i.order_id WHERE o.id IS NULL"),
+    count(
+      target,
+      "SELECT count(*) n FROM order_items i LEFT JOIN orders o ON o.id=i.order_id WHERE o.id IS NULL",
+    ),
     0,
   );
   assert.equal(
-    count(target, "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL"),
+    count(
+      target,
+      "SELECT count(*) n FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE u.id IS NULL",
+    ),
     0,
   );
   // PII was scrubbed: emails differ from the originals but keys were preserved.
-  const emails = (target.prepare("SELECT email FROM users").all() as any[]).map((r) => r.email);
-  assert.ok(emails.every((e) => !["a@x.com", "b@x.com", "c@x.com"].includes(e)));
+  const emails = (target.prepare("SELECT email FROM users").all() as any[]).map(
+    (r) => r.email,
+  );
+  assert.ok(
+    emails.every((e) => !["a@x.com", "b@x.com", "c@x.com"].includes(e)),
+  );
 
   src.close();
   target.close();

@@ -10,7 +10,10 @@ import type { Schema, TableInfo } from "../src/types.js";
 
 function tbl(s: Schema, key: string): TableInfo {
   const t = s.tables.get(key);
-  assert.ok(t, `expected table ${key}; have ${[...s.tables.keys()].join(", ")}`);
+  assert.ok(
+    t,
+    `expected table ${key}; have ${[...s.tables.keys()].join(", ")}`,
+  );
   return t;
 }
 
@@ -97,7 +100,11 @@ test("captures inline, table-level, and ALTER TABLE foreign keys", () => {
   assert.deepEqual(items.primaryKey, ["order_id", "product_id"]);
   assert.deepEqual(items.foreignKeys, [
     { columns: ["order_id"], refTable: "public.orders", refColumns: ["id"] },
-    { columns: ["product_id"], refTable: "public.products", refColumns: ["id"] },
+    {
+      columns: ["product_id"],
+      refTable: "public.products",
+      refColumns: ["id"],
+    },
   ]);
 });
 
@@ -172,7 +179,10 @@ test("end-to-end: generates coherent, constraint-valid rows", () => {
     );
   `);
   const { order, cyclic } = topoSort(s);
-  const data = buildData(s, order, cyclic, { rows: { users: 5, orders: 20 }, seed: 7 });
+  const data = buildData(s, order, cyclic, {
+    rows: { users: 5, orders: 20 },
+    seed: 7,
+  });
 
   const userIds = new Set(
     data.find((d) => d.table.key === "public.users")!.rows.map((r) => r.id),
@@ -183,7 +193,13 @@ test("end-to-end: generates coherent, constraint-valid rows", () => {
   assert.equal(orders.length, 20);
   for (const o of orders) {
     assert.ok(userIds.has(o.user_id), "FK points at a real user");
-    assert.ok(["pending", "paid", "shipped"].includes(o.status as string), "enum value in range");
-    assert.ok((o.quantity as number) >= 1 && (o.quantity as number) <= 10, "CHECK bound honored");
+    assert.ok(
+      ["pending", "paid", "shipped"].includes(o.status as string),
+      "enum value in range",
+    );
+    assert.ok(
+      (o.quantity as number) >= 1 && (o.quantity as number) <= 10,
+      "CHECK bound honored",
+    );
   }
 });

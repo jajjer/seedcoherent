@@ -38,7 +38,11 @@ export function mysqlLiteral(v: unknown, col: ColumnInfo): string {
   if (typeof v === "number") return String(v);
   if (v instanceof Date) return `'${formatDate(v)}'`;
   if (Buffer.isBuffer(v)) return `X'${v.toString("hex")}'`;
-  if (Array.isArray(v) || JSON_TYPES.has(col.dataType) || typeof v === "object") {
+  if (
+    Array.isArray(v) ||
+    JSON_TYPES.has(col.dataType) ||
+    typeof v === "object"
+  ) {
     return `'${escapeString(JSON.stringify(v))}'`;
   }
   return `'${escapeString(String(v))}'`;
@@ -50,7 +54,11 @@ export function mysqlLiteral(v: unknown, col: ColumnInfo): string {
  * those either triggered the conflict or are server-managed.
  * Returns an empty string for `skip` or when no updatable columns remain.
  */
-function mysqlDupKeyClause(table: TableInfo, columns: ColumnInfo[], action: OnConflict | undefined): string {
+function mysqlDupKeyClause(
+  table: TableInfo,
+  columns: ColumnInfo[],
+  action: OnConflict | undefined,
+): string {
   if (action !== "update") return "";
   const pkSet = new Set(table.primaryKey);
   const setCols = columns
@@ -61,8 +69,15 @@ function mysqlDupKeyClause(table: TableInfo, columns: ColumnInfo[], action: OnCo
 }
 
 /** Build a full, runnable MySQL script. FK checks are relaxed so any order loads. */
-export function toSqlMysql(data: TableData[], opts: ScriptOptions = {}): string {
-  const parts: string[] = ["SET FOREIGN_KEY_CHECKS=0;", "START TRANSACTION;", ""];
+export function toSqlMysql(
+  data: TableData[],
+  opts: ScriptOptions = {},
+): string {
+  const parts: string[] = [
+    "SET FOREIGN_KEY_CHECKS=0;",
+    "START TRANSACTION;",
+    "",
+  ];
   // INSERT IGNORE turns a duplicate-key collision into a skipped row (a warning,
   // not an error), making the script re-runnable against a populated database.
   const ignore = opts.onConflict === "skip" ? " IGNORE" : "";
@@ -76,7 +91,11 @@ export function toSqlMysql(data: TableData[], opts: ScriptOptions = {}): string 
       const tuple = columns.map((c) => mysqlLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + mysqlDupKeyClause(table, columns, opts.onConflict) + ";");
+    parts.push(
+      values.join(",\n") +
+        mysqlDupKeyClause(table, columns, opts.onConflict) +
+        ";",
+    );
     parts.push("");
   }
 
@@ -94,7 +113,11 @@ export function toParam(v: unknown, col: ColumnInfo): unknown {
   if (v === null || v === undefined) return null;
   if (typeof v === "boolean") return v ? 1 : 0;
   if (v instanceof Date || Buffer.isBuffer(v)) return v;
-  if (Array.isArray(v) || JSON_TYPES.has(col.dataType) || typeof v === "object") {
+  if (
+    Array.isArray(v) ||
+    JSON_TYPES.has(col.dataType) ||
+    typeof v === "object"
+  ) {
     return JSON.stringify(v);
   }
   return v;
@@ -171,7 +194,11 @@ export class MysqlSink implements RowSink {
     }
   }
 
-  private async insertChunk(table: TableInfo, cols: ColumnInfo[], rows: Row[]): Promise<void> {
+  private async insertChunk(
+    table: TableInfo,
+    cols: ColumnInfo[],
+    rows: Row[],
+  ): Promise<void> {
     if (rows.length === 0) return;
     const colList = cols.map((c) => IDENT(c.name)).join(", ");
     const placeholder = `(${cols.map(() => "?").join(", ")})`;
@@ -217,7 +244,11 @@ export async function insertDataMysql(
   opts: { truncate?: boolean; batchSize?: number } = {},
 ): Promise<number> {
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
-  const sink = new MysqlSink(conn, { truncate: opts.truncate, tables: data.map((d) => d.table) }, batchSize);
+  const sink = new MysqlSink(
+    conn,
+    { truncate: opts.truncate, tables: data.map((d) => d.table) },
+    batchSize,
+  );
   for (const { table, rows, columns } of data) {
     await sink.begin(table, columns);
     await sink.write(rows);

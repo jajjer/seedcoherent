@@ -5,11 +5,19 @@
  */
 
 import { Faker } from "@faker-js/faker";
-import { inferGenerator, partitionKeyGenerator, type Generator } from "./infer.js";
+import {
+  inferGenerator,
+  partitionKeyGenerator,
+  type Generator,
+} from "./infer.js";
 import { applyCoherence, planCoherence } from "./coherence.js";
 import { resolveLocale } from "./locale.js";
 import { parseChecks } from "./checks.js";
-import { resolveDistribution, resolveValueSpec, type Sampler } from "./distribution.js";
+import {
+  resolveDistribution,
+  resolveValueSpec,
+  type Sampler,
+} from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
 import {
   applyTemporal,
@@ -17,10 +25,16 @@ import {
   planTemporal,
   temporalWindow,
   timestampMs,
-  type TemporalPlan,
 } from "./temporal.js";
 import { applyStatus, planStatus } from "./status.js";
-import type { Config, ColumnInfo, ColumnOverride, ForeignKey, Schema, TableInfo } from "./types.js";
+import type {
+  Config,
+  ColumnInfo,
+  ColumnOverride,
+  ForeignKey,
+  Schema,
+  TableInfo,
+} from "./types.js";
 
 export type Row = Record<string, unknown>;
 
@@ -103,7 +117,11 @@ function isDbAssigned(col: ColumnInfo): boolean {
  * been overridden — leaving it out lets the database supply a valid default we
  * can't synthesize (money, interval, geometry, …), instead of inserting NULL.
  */
-function emitsColumn(table: TableInfo, col: ColumnInfo, config: Config): boolean {
+function emitsColumn(
+  table: TableInfo,
+  col: ColumnInfo,
+  config: Config,
+): boolean {
   if (isDbAssigned(col)) return false;
   if (
     col.dataType === "unsupported" &&
@@ -142,7 +160,8 @@ export function requiredUnsupportedColumns(
     if (!table) continue;
     for (const col of table.columns) {
       if (col.dataType !== "unsupported") continue;
-      if (col.nullable || col.hasDefault || col.isIdentity || col.isGenerated) continue;
+      if (col.nullable || col.hasDefault || col.isIdentity || col.isGenerated)
+        continue;
       if (isOverridden(table, col.name, config.columns)) continue;
       if (fkForColumn(table, col.name)) continue;
       out.push({ table: table.key, column: col.name, udtName: col.udtName });
@@ -190,7 +209,8 @@ export function* streamData(
   const generated = new Map<string, Row[]>(); // table.key -> rows (for FK lookups)
   // In append mode, pre-seed the FK pools with rows already in the target so new
   // children can reference existing parents.
-  if (append) for (const [key, rows] of append.existing) generated.set(key, rows);
+  if (append)
+    for (const [key, rows] of append.existing) generated.set(key, rows);
 
   // Temporal coherence: the causal window plus each table's creation column, so
   // a child's creation time can be floored at its parents'.
@@ -216,13 +236,22 @@ export function* streamData(
       if (!fkForColumn(table, col.name)) {
         // A partition-key column must stay inside an existing partition, else the
         // parent-table insert has nowhere to route the row.
-        const partGen = table.partition ? partitionKeyGenerator(col, table.partition) : null;
+        const partGen = table.partition
+          ? partitionKeyGenerator(col, table.partition)
+          : null;
         // A configured value distribution (non-FK columns only — FK columns take
         // the parent-selection path above) reshapes a categorical column's labels.
         const dist = resolveValueSpec(table, col.name, config.distributions);
         gens.set(
           col.name,
-          partGen ?? inferGenerator(table, col, config.columns, checks.get(col.name), dist),
+          partGen ??
+            inferGenerator(
+              table,
+              col,
+              config.columns,
+              checks.get(col.name),
+              dist,
+            ),
         );
       }
     }
@@ -261,7 +290,8 @@ export function* streamData(
     const splan = planStatus(table, checks);
     const partitionKeys = new Set(table.partition?.keyColumns ?? []);
     const frozen = (colName: string) =>
-      partitionKeys.has(colName) || isOverridden(table, colName, config.columns);
+      partitionKeys.has(colName) ||
+      isOverridden(table, colName, config.columns);
     const coherenceEligible = (colName: string) => gens.has(colName);
 
     const count = rowCount(table, config);
@@ -270,7 +300,9 @@ export function* streamData(
     const rows: Row[] = [];
     let pending: Row[] = [];
     // Track seen tuples per unique constraint (PK included).
-    const uniqueSets = [table.primaryKey, ...table.uniques].filter((u) => u.length > 0);
+    const uniqueSets = [table.primaryKey, ...table.uniques].filter(
+      (u) => u.length > 0,
+    );
     const seen = uniqueSets.map(() => new Set<string>());
 
     // Synthetic ids continue past whatever is already in the target (append),
@@ -303,24 +335,50 @@ export function* streamData(
         // Rewrite date/timestamp columns so this row's creation time follows the
         // parents it references and its own activity/expiry columns follow it.
         if (tplan) {
-          applyTemporal(tplan, candidate, parentFloor(fkParents, createdColOf), window, faker, frozen);
+          applyTemporal(
+            tplan,
+            candidate,
+            parentFloor(fkParents, createdColOf),
+            window,
+            faker,
+            frozen,
+          );
         }
         // Make a row's names/addresses agree with each other before uniqueness is
         // checked, so a coherent value (e.g. a unique email derived from the name)
         // participates in the collision test.
         if (cplan) {
-          applyCoherence(cplan, candidate, cohFaker, coherenceEligible, frozen, locale.usAddress);
+          applyCoherence(
+            cplan,
+            candidate,
+            cohFaker,
+            coherenceEligible,
+            frozen,
+            locale.usAddress,
+          );
         }
         // Make event-marker timestamps agree with the row's status (shipped_at set
         // once shipped, cleared while pending). Runs after temporal so a filled
         // marker can be floored at the settled creation time.
         if (splan) {
           const createdCol = createdColOf.get(table.key);
-          const createdMs = createdCol ? timestampMs(candidate[createdCol]) : null;
-          applyStatus(splan, candidate, createdMs, window, statusFaker, coherenceEligible, frozen);
+          const createdMs = createdCol
+            ? timestampMs(candidate[createdCol])
+            : null;
+          applyStatus(
+            splan,
+            candidate,
+            createdMs,
+            window,
+            statusFaker,
+            coherenceEligible,
+            frozen,
+          );
         }
         // Check every unique constraint.
-        const keys = uniqueSets.map((cols) => cols.map((c) => serializeKey(candidate[c])).join("\u0001"));
+        const keys = uniqueSets.map((cols) =>
+          cols.map((c) => serializeKey(candidate[c])).join("\u0001"),
+        );
         const collision = keys.some((k, idx) => seen[idx].has(k));
         if (!collision) {
           keys.forEach((k, idx) => seen[idx].add(k));
@@ -357,7 +415,14 @@ export function buildData(
   const result: TableData[] = [];
   let current: TableData | null = null;
   // One unbounded batch per table keeps this a simple regrouping of streamData.
-  for (const batch of streamData(schema, order, cyclic, config, Infinity, append)) {
+  for (const batch of streamData(
+    schema,
+    order,
+    cyclic,
+    config,
+    Infinity,
+    append,
+  )) {
     if (!current || current.table !== batch.table) {
       current = { table: batch.table, rows: [], columns: batch.columns };
       result.push(current);
@@ -385,7 +450,14 @@ export async function generateInto(
   let currentTable: TableInfo | null = null;
   let count = 0;
 
-  for (const batch of streamData(schema, order, cyclic, config, batchSize, append)) {
+  for (const batch of streamData(
+    schema,
+    order,
+    cyclic,
+    config,
+    batchSize,
+    append,
+  )) {
     if (batch.table !== currentTable) {
       await sink.begin(batch.table, batch.columns);
       currentTable = batch.table;
@@ -429,7 +501,9 @@ export class CollectSink implements RowSink {
 export function usesSyntheticId(table: TableInfo): boolean {
   if (table.primaryKey.length !== 1) return false;
   const col = table.columns.find((c) => c.name === table.primaryKey[0]);
-  return !!col && (col.isIdentity || col.hasDefault) && col.dataType === "integer";
+  return (
+    !!col && (col.isIdentity || col.hasDefault) && col.dataType === "integer"
+  );
 }
 
 /**
@@ -513,7 +587,10 @@ function valueForColumn(
     if (fk.refTable === table.key) {
       // Self-reference: point at an earlier row in this batch, or null.
       const nonNull = !col.nullable;
-      if (rowIndex === 0) return nonNull ? currentRows[0]?.[refCol] ?? nextIdPeek(table, nextId) : null;
+      if (rowIndex === 0)
+        return nonNull
+          ? (currentRows[0]?.[refCol] ?? nextIdPeek(table, nextId))
+          : null;
       if (!nonNull && faker.datatype.boolean({ probability: 0.6 })) return null;
       const parent = faker.helpers.arrayElement(currentRows.slice(0, rowIndex));
       return parent[refCol];
@@ -537,7 +614,9 @@ function valueForColumn(
     col.nullable &&
     !isInAnyUnique(table, col.name) &&
     !table.partition?.keyColumns.includes(col.name) &&
-    faker.datatype.boolean({ probability: nullRates.get(col.name) ?? NULL_PROBABILITY })
+    faker.datatype.boolean({
+      probability: nullRates.get(col.name) ?? NULL_PROBABILITY,
+    })
   ) {
     return null;
   }

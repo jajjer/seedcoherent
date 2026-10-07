@@ -30,7 +30,11 @@ function usersAndOrders(): Schema {
     primaryKey: ["id"],
   });
   const orders = table("orders", {
-    columns: [idCol(), col("user_id", { udtName: "int4" }), col("created_at", { udtName: "timestamptz" })],
+    columns: [
+      idCol(),
+      col("user_id", { udtName: "int4" }),
+      col("created_at", { udtName: "timestamptz" }),
+    ],
     primaryKey: ["id"],
     foreignKeys: [fk(["user_id"], "users", ["id"])],
   });
@@ -48,9 +52,15 @@ test("updated_at is never earlier than created_at in the same row", () => {
 });
 
 test("a child's created_at is never earlier than its parent's created_at", () => {
-  const data = build(usersAndOrders(), { rows: { users: 50, orders: 500 }, seed: 7 });
+  const data = build(usersAndOrders(), {
+    rows: { users: 50, orders: 500 },
+    seed: 7,
+  });
   const userCreated = new Map(
-    rowsFor(data, "public.users").map((u) => [u.id, timestampMs(u.created_at)!]),
+    rowsFor(data, "public.users").map((u) => [
+      u.id,
+      timestampMs(u.created_at)!,
+    ]),
   );
   for (const o of rowsFor(data, "public.orders")) {
     assert.ok(
@@ -61,11 +71,19 @@ test("a child's created_at is never earlier than its parent's created_at", () =>
 });
 
 test("creation timestamps land inside the [since, until] window", () => {
-  const config: Config = { rows: { users: 300 }, seed: 3, since: "2020-06-01", until: "2020-12-31" };
+  const config: Config = {
+    rows: { users: 300 },
+    seed: 3,
+    since: "2020-06-01",
+    until: "2020-12-31",
+  };
   const win = temporalWindow(config);
   for (const u of rowsFor(build(usersAndOrders(), config), "public.users")) {
     const ms = timestampMs(u.created_at)!;
-    assert.ok(ms >= win.sinceMs && ms <= win.untilMs, `created_at ${u.created_at} outside window`);
+    assert.ok(
+      ms >= win.sinceMs && ms <= win.untilMs,
+      `created_at ${u.created_at} outside window`,
+    );
   }
 });
 
@@ -92,12 +110,22 @@ test("expiry columns may run past `until`, activity columns may not", () => {
     ],
     primaryKey: ["id"],
   });
-  const config: Config = { rows: { subscriptions: 300 }, seed: 5, until: "2022-01-01" };
+  const config: Config = {
+    rows: { subscriptions: 300 },
+    seed: 5,
+    until: "2022-01-01",
+  };
   const win = temporalWindow(config);
   let sawFuture = false;
-  for (const r of rowsFor(build(schema(subs), config), "public.subscriptions")) {
+  for (const r of rowsFor(
+    build(schema(subs), config),
+    "public.subscriptions",
+  )) {
     const created = timestampMs(r.created_at)!;
-    assert.ok(timestampMs(r.last_login)! >= created && timestampMs(r.last_login)! <= win.untilMs);
+    assert.ok(
+      timestampMs(r.last_login)! >= created &&
+        timestampMs(r.last_login)! <= win.untilMs,
+    );
     const exp = timestampMs(r.expires_at)!;
     assert.ok(exp >= created && exp <= win.futureMs);
     if (exp > win.untilMs) sawFuture = true;
@@ -114,7 +142,10 @@ test("date-only columns stay YYYY-MM-DD strings and remain ordered", () => {
     ],
     primaryKey: ["id"],
   });
-  for (const r of rowsFor(build(schema(events), { rows: { events: 100 }, seed: 4 }), "public.events")) {
+  for (const r of rowsFor(
+    build(schema(events), { rows: { events: 100 }, seed: 4 }),
+    "public.events",
+  )) {
     assert.match(String(r.created_at), /^\d{4}-\d{2}-\d{2}$/);
     assert.match(String(r.updated_at), /^\d{4}-\d{2}-\d{2}$/);
     assert.ok(String(r.updated_at) >= String(r.created_at));
@@ -130,7 +161,10 @@ test("output stays byte-identical across runs with the same seed", () => {
 
 test("planTemporal picks the first creation column and ignores tables without one", () => {
   const withCreate = table("t", {
-    columns: [col("registered_at", { udtName: "timestamptz" }), col("last_seen", { udtName: "timestamptz" })],
+    columns: [
+      col("registered_at", { udtName: "timestamptz" }),
+      col("last_seen", { udtName: "timestamptz" }),
+    ],
   });
   const plan = planTemporal(withCreate);
   assert.equal(plan?.created.name, "registered_at");
@@ -144,6 +178,12 @@ test("planTemporal picks the first creation column and ignores tables without on
 });
 
 test("temporalWindow rejects since after until", () => {
-  assert.throws(() => temporalWindow({ since: "2023-01-01", until: "2022-01-01" }), /after --until/);
-  assert.throws(() => temporalWindow({ until: "not-a-date" }), /Invalid --until/);
+  assert.throws(
+    () => temporalWindow({ since: "2023-01-01", until: "2022-01-01" }),
+    /after --until/,
+  );
+  assert.throws(
+    () => temporalWindow({ until: "not-a-date" }),
+    /Invalid --until/,
+  );
 });

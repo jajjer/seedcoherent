@@ -57,13 +57,15 @@ interface Tok {
   end: number;
 }
 
-const isSpace = (c: string) => c === " " || c === "\t" || c === "\r" || c === "\n" || c === "\f";
+const isSpace = (c: string) =>
+  c === " " || c === "\t" || c === "\r" || c === "\n" || c === "\f";
 const isDigit = (c: string) => c >= "0" && c <= "9";
 const isWordStart = (c: string) => /[A-Za-z_]/.test(c);
 const isWordChar = (c: string) => /[A-Za-z0-9_$]/.test(c);
 
 /**
- * Tokenize a DDL script. Handles `--`/`#`/`/* *​/` comments, `'...'` strings, and
+ * Tokenize a DDL script. Handles line (`--`, `#`) and C-style block comments,
+ * `'...'` strings, and
  * every identifier-quoting style the two dialects use: backticks (MySQL),
  * `[...]` brackets (SQLite), and `"..."` (a quoted identifier in SQLite, a string
  * literal in MySQL's default mode).
@@ -135,7 +137,12 @@ function tokenize(sql: string, dialect: SqlDialect): Tok[] {
         }
       }
       // MySQL (default sql_mode) reads "..." as a string; SQLite as an identifier.
-      toks.push({ kind: dialect === "mysql" ? "str" : "ident", text, start, end: i });
+      toks.push({
+        kind: dialect === "mysql" ? "str" : "ident",
+        text,
+        start,
+        end: i,
+      });
       continue;
     }
     if (ch === "'") {
@@ -175,8 +182,10 @@ function tokenize(sql: string, dialect: SqlDialect): Tok[] {
 }
 
 /** Uppercased text for a word token, or "" for anything else — for keyword compares. */
-const kw = (t: Tok | undefined): string => (t && t.kind === "word" ? t.text.toUpperCase() : "");
-const isPunct = (t: Tok | undefined, c: string): boolean => !!t && t.kind === "punct" && t.text === c;
+const kw = (t: Tok | undefined): string =>
+  t && t.kind === "word" ? t.text.toUpperCase() : "";
+const isPunct = (t: Tok | undefined, c: string): boolean =>
+  !!t && t.kind === "punct" && t.text === c;
 
 /** Split a token stream into statements on top-level `;`. */
 function statements(toks: Tok[]): Tok[][] {
@@ -198,7 +207,10 @@ function statements(toks: Tok[]): Tok[][] {
  * From `pos` (at an opening `(`), return the index just past the matching `)`,
  * and the slice of tokens strictly inside the parentheses.
  */
-function balancedParen(toks: Tok[], open: number): { inner: Tok[]; after: number } {
+function balancedParen(
+  toks: Tok[],
+  open: number,
+): { inner: Tok[]; after: number } {
   let depth = 0;
   for (let i = open; i < toks.length; i++) {
     if (isPunct(toks[i], "(")) depth++;
@@ -247,7 +259,9 @@ function readName(
 /** Column names inside a `(a, b, c)` group — identifiers/words, commas ignored. */
 function columnList(inner: Tok[]): string[] {
   return splitCommas(inner)
-    .map((g) => g.find((t) => t.kind === "ident" || t.kind === "word")?.text ?? "")
+    .map(
+      (g) => g.find((t) => t.kind === "ident" || t.kind === "word")?.text ?? "",
+    )
     .filter(Boolean);
 }
 
@@ -387,7 +401,10 @@ function parseColumn(
     } else if (word === "DEFAULT") {
       col.hasDefault = true;
       p = skipDefaultValue(group, p + 1);
-    } else if (word === "GENERATED" || (word === "AS" && isPunct(group[p + 1], "("))) {
+    } else if (
+      word === "GENERATED" ||
+      (word === "AS" && isPunct(group[p + 1], "("))
+    ) {
       col.isGenerated = true;
       p = skipGenerated(group, p);
     } else if (word === "REFERENCES") {
@@ -415,7 +432,10 @@ function parseColumn(
       p += 3; // CHARACTER SET <name>
     } else if (word === "CHARSET") {
       p += 2;
-    } else if (word === "ON" && (kw(group[p + 1]) === "UPDATE" || kw(group[p + 1]) === "DELETE")) {
+    } else if (
+      word === "ON" &&
+      (kw(group[p + 1]) === "UPDATE" || kw(group[p + 1]) === "DELETE")
+    ) {
       p = skipDefaultValue(group, p + 2); // ON UPDATE/DELETE <action>
     } else {
       p += 1; // permissively skip anything unrecognized
@@ -447,10 +467,16 @@ function skipGenerated(group: Tok[], pos: number): number {
 }
 
 /** Normalize a CHECK expression's raw text per dialect and attach it to the table. */
-function pushCheck(table: TableInfo, sql: string, inner: Tok[], dialect: SqlDialect): void {
+function pushCheck(
+  table: TableInfo,
+  sql: string,
+  inner: Tok[],
+  dialect: SqlDialect,
+): void {
   if (!inner.length) return;
   const raw = sql.slice(inner[0].start, inner[inner.length - 1].end);
-  const expr = dialect === "mysql" ? normalizeMysqlCheck(raw) : normalizeSqliteCheck(raw);
+  const expr =
+    dialect === "mysql" ? normalizeMysqlCheck(raw) : normalizeSqliteCheck(raw);
   table.checks.push({ expr });
 }
 
@@ -470,15 +496,18 @@ function parseTableConstraint(
   const head = kw(group[p]);
   if (head === "PRIMARY" && kw(group[p + 1]) === "KEY") {
     const open = group.findIndex((t, i) => i > p && isPunct(t, "("));
-    if (open >= 0) table.primaryKey = columnList(balancedParen(group, open).inner);
+    if (open >= 0)
+      table.primaryKey = columnList(balancedParen(group, open).inner);
   } else if (head === "UNIQUE") {
     const open = group.findIndex((t, i) => i > p && isPunct(t, "("));
-    if (open >= 0) table.uniques.push(columnList(balancedParen(group, open).inner));
+    if (open >= 0)
+      table.uniques.push(columnList(balancedParen(group, open).inner));
   } else if (head === "FOREIGN" && kw(group[p + 1]) === "KEY") {
     parseForeignKey(group, p + 2, defaultSchema, table);
   } else if (head === "CHECK") {
     const open = group.findIndex((t, i) => i > p && isPunct(t, "("));
-    if (open >= 0) pushCheck(table, sql, balancedParen(group, open).inner, dialect);
+    if (open >= 0)
+      pushCheck(table, sql, balancedParen(group, open).inner, dialect);
   }
   // KEY / INDEX / FULLTEXT / SPATIAL (non-unique indexes) and anything else: ignored.
 }
@@ -523,7 +552,12 @@ function parseCreateTable(
   while (["TEMPORARY", "TEMP", "GLOBAL", "LOCAL"].includes(kw(toks[p]))) p++;
   if (kw(toks[p]) !== "TABLE") return null;
   p++;
-  if (kw(toks[p]) === "IF" && kw(toks[p + 1]) === "NOT" && kw(toks[p + 2]) === "EXISTS") p += 3;
+  if (
+    kw(toks[p]) === "IF" &&
+    kw(toks[p + 1]) === "NOT" &&
+    kw(toks[p + 2]) === "EXISTS"
+  )
+    p += 3;
 
   const named = readName(toks, p, defaultSchema);
   if (!named.name) return null;
@@ -548,7 +582,19 @@ function parseCreateTable(
 /** Does this comma-group open a table-level constraint (vs. a column definition)? */
 function isTableConstraint(group: Tok[]): boolean {
   const first = kw(group[0]);
-  if (["PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT", "KEY", "INDEX", "FULLTEXT", "SPATIAL"].includes(first)) {
+  if (
+    [
+      "PRIMARY",
+      "UNIQUE",
+      "FOREIGN",
+      "CHECK",
+      "CONSTRAINT",
+      "KEY",
+      "INDEX",
+      "FULLTEXT",
+      "SPATIAL",
+    ].includes(first)
+  ) {
     // `KEY`/`INDEX`/`UNIQUE`/`PRIMARY` are constraint leads only when not a column
     // name; a bare-word column literally named "key" would be quoted as an ident.
     return group[0].kind === "word";
@@ -568,7 +614,12 @@ function parseCreateIndex(
   if (kw(toks[p]) !== "INDEX") return;
   if (!unique) return; // non-unique indexes don't constrain generation
   p++;
-  if (kw(toks[p]) === "IF" && kw(toks[p + 1]) === "NOT" && kw(toks[p + 2]) === "EXISTS") p += 3;
+  if (
+    kw(toks[p]) === "IF" &&
+    kw(toks[p + 1]) === "NOT" &&
+    kw(toks[p + 2]) === "EXISTS"
+  )
+    p += 3;
   const idx = readName(toks, p, defaultSchema);
   p = idx.next;
   if (kw(toks[p]) !== "ON") return;

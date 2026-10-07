@@ -1,9 +1,15 @@
 /** Test helpers: build in-memory Schema/Table/Column objects without a live DB. */
 
 import { categorize } from "../src/introspect.js";
-import type { CheckConstraint, ColumnInfo, ForeignKey, Schema, TableInfo } from "../src/types.js";
+import type {
+  CheckConstraint,
+  ColumnInfo,
+  ForeignKey,
+  Schema,
+  TableInfo,
+} from "../src/types.js";
 
-export interface ColOpts extends Partial<Omit<ColumnInfo, "name">> {}
+export type ColOpts = Partial<Omit<ColumnInfo, "name">>;
 
 /** Build a ColumnInfo with sensible defaults; udtName drives dataType unless set. */
 export function col(name: string, opts: ColOpts = {}): ColumnInfo {
@@ -57,7 +63,11 @@ export function table(name: string, opts: TableOpts): TableInfo {
 }
 
 /** Foreign key referencing `public.<refTable>`; single or composite. */
-export function fk(columns: string[], refTable: string, refColumns: string[]): ForeignKey {
+export function fk(
+  columns: string[],
+  refTable: string,
+  refColumns: string[],
+): ForeignKey {
   return { columns, refTable: `public.${refTable}`, refColumns };
 }
 

@@ -11,7 +11,8 @@ import {
 import { parseChecks } from "../src/checks.js";
 import type { Connection } from "../src/types.js";
 
-const cat = (dt: string, ct = dt, en: string[] | null = null) => categorizeMysql(dt, ct, en);
+const cat = (dt: string, ct = dt, en: string[] | null = null) =>
+  categorizeMysql(dt, ct, en);
 
 test("tinyint(1) is boolean, wider tinyint is integer", () => {
   assert.equal(cat("tinyint", "tinyint(1)"), "boolean");
@@ -20,7 +21,15 @@ test("tinyint(1) is boolean, wider tinyint is integer", () => {
 });
 
 test("integer family", () => {
-  for (const t of ["smallint", "mediumint", "int", "integer", "bigint", "bit", "year"]) {
+  for (const t of [
+    "smallint",
+    "mediumint",
+    "int",
+    "integer",
+    "bigint",
+    "bit",
+    "year",
+  ]) {
     assert.equal(cat(t), "integer");
   }
 });
@@ -39,10 +48,25 @@ test("date/time families are distinguished", () => {
 });
 
 test("binary/text/json families", () => {
-  for (const t of ["binary", "varbinary", "blob", "tinyblob", "mediumblob", "longblob"]) {
+  for (const t of [
+    "binary",
+    "varbinary",
+    "blob",
+    "tinyblob",
+    "mediumblob",
+    "longblob",
+  ]) {
     assert.equal(cat(t), "bytea");
   }
-  for (const t of ["char", "varchar", "text", "tinytext", "mediumtext", "longtext", "set"]) {
+  for (const t of [
+    "char",
+    "varchar",
+    "text",
+    "tinytext",
+    "mediumtext",
+    "longtext",
+    "set",
+  ]) {
     assert.equal(cat(t), "text");
   }
   assert.equal(cat("json"), "json");
@@ -73,7 +97,9 @@ test("normalizeMysqlCheck rewrites backticks, strips charset introducers, and re
 });
 
 test("a MySQL IN-list CHECK parses into a membership set the generator can draw from", () => {
-  const norm = normalizeMysqlCheck("(`status` in (_utf8mb4'active',_utf8mb4'inactive',_utf8mb4'closed'))");
+  const norm = normalizeMysqlCheck(
+    "(`status` in (_utf8mb4'active',_utf8mb4'inactive',_utf8mb4'closed'))",
+  );
   const bounds = parseChecks([{ expr: norm }]).get("status");
   assert.deepEqual(bounds?.in, ["active", "inactive", "closed"]);
 });
@@ -81,7 +107,9 @@ test("a MySQL IN-list CHECK parses into a membership set the generator can draw 
 test("MySQL 8.4 backslash-escaped IN-list quotes are unfolded to the same membership set", () => {
   // 8.4 stores the clause as `_latin1\'x\'` (escaped quotes) where 8.0 stored
   // `_utf8mb4'x'`; both must normalize identically so the domain isn't lost.
-  const norm = normalizeMysqlCheck("(`tier` in (_latin1\\'free\\',_latin1\\'pro\\',_latin1\\'enterprise\\'))");
+  const norm = normalizeMysqlCheck(
+    "(`tier` in (_latin1\\'free\\',_latin1\\'pro\\',_latin1\\'enterprise\\'))",
+  );
   assert.equal(norm, `("tier" = ANY (ARRAY['free','pro','enterprise']))`);
   const bounds = parseChecks([{ expr: norm }]).get("tier");
   assert.deepEqual(bounds?.in, ["free", "pro", "enterprise"]);
@@ -98,8 +126,10 @@ function mockConn(fixtures: {
     async query<T = any>(sql: string): Promise<{ rows: T[] }> {
       let rows: any[] = [];
       if (sql.includes("information_schema.TABLES")) rows = fixtures.tables;
-      else if (sql.includes("information_schema.COLUMNS")) rows = fixtures.columns;
-      else if (sql.includes("information_schema.CHECK_CONSTRAINTS")) rows = fixtures.checks ?? [];
+      else if (sql.includes("information_schema.COLUMNS"))
+        rows = fixtures.columns;
+      else if (sql.includes("information_schema.CHECK_CONSTRAINTS"))
+        rows = fixtures.checks ?? [];
       else if (sql.includes("TABLE_CONSTRAINTS")) rows = fixtures.constraints;
       return { rows: rows as T[] };
     },
@@ -133,7 +163,11 @@ test("introspectMysql builds tables, keys, enums, FKs, and checks", async () => 
       { schema: "app", table_name: "orders" },
     ],
     columns: [
-      column({ table_name: "users", column_name: "id", extra: "auto_increment" }),
+      column({
+        table_name: "users",
+        column_name: "id",
+        extra: "auto_increment",
+      }),
       column({
         table_name: "users",
         column_name: "email",
@@ -150,7 +184,11 @@ test("introspectMysql builds tables, keys, enums, FKs, and checks", async () => 
         column_type: "enum('active','inactive')",
         is_nullable: "YES",
       }),
-      column({ table_name: "orders", column_name: "id", extra: "auto_increment" }),
+      column({
+        table_name: "orders",
+        column_name: "id",
+        extra: "auto_increment",
+      }),
       column({ table_name: "orders", column_name: "user_id", ordinal: 2 }),
       column({
         table_name: "orders",
@@ -165,16 +203,57 @@ test("introspectMysql builds tables, keys, enums, FKs, and checks", async () => 
       column({ table_name: "user_view", column_name: "id" }),
     ],
     constraints: [
-      { schema: "app", table_name: "users", ctype: "PRIMARY KEY", cname: "PRIMARY", column_name: "id", ref_schema: null, ref_table: null, ref_column: null },
-      { schema: "app", table_name: "users", ctype: "UNIQUE", cname: "email_uq", column_name: "email", ref_schema: null, ref_table: null, ref_column: null },
-      { schema: "app", table_name: "orders", ctype: "PRIMARY KEY", cname: "PRIMARY", column_name: "id", ref_schema: null, ref_table: null, ref_column: null },
-      { schema: "app", table_name: "orders", ctype: "FOREIGN KEY", cname: "fk_user", column_name: "user_id", ref_schema: "app", ref_table: "users", ref_column: "id" },
+      {
+        schema: "app",
+        table_name: "users",
+        ctype: "PRIMARY KEY",
+        cname: "PRIMARY",
+        column_name: "id",
+        ref_schema: null,
+        ref_table: null,
+        ref_column: null,
+      },
+      {
+        schema: "app",
+        table_name: "users",
+        ctype: "UNIQUE",
+        cname: "email_uq",
+        column_name: "email",
+        ref_schema: null,
+        ref_table: null,
+        ref_column: null,
+      },
+      {
+        schema: "app",
+        table_name: "orders",
+        ctype: "PRIMARY KEY",
+        cname: "PRIMARY",
+        column_name: "id",
+        ref_schema: null,
+        ref_table: null,
+        ref_column: null,
+      },
+      {
+        schema: "app",
+        table_name: "orders",
+        ctype: "FOREIGN KEY",
+        cname: "fk_user",
+        column_name: "user_id",
+        ref_schema: "app",
+        ref_table: "users",
+        ref_column: "id",
+      },
     ],
-    checks: [{ schema: "app", table_name: "orders", check_clause: "(`total` >= 0)" }],
+    checks: [
+      { schema: "app", table_name: "orders", check_clause: "(`total` >= 0)" },
+    ],
   });
 
   const schema = await introspectMysql(conn, ["app"]);
-  assert.deepEqual([...schema.tables.keys()].sort(), ["app.orders", "app.users"]);
+  assert.deepEqual([...schema.tables.keys()].sort(), [
+    "app.orders",
+    "app.users",
+  ]);
 
   const users = schema.tables.get("app.users")!;
   assert.deepEqual(users.primaryKey, ["id"]);
@@ -202,7 +281,9 @@ test("introspectMysql tolerates servers without CHECK_CONSTRAINTS", async () => 
       if (sql.includes("information_schema.TABLES"))
         return { rows: [{ schema: "app", table_name: "t" }] as T[] };
       if (sql.includes("information_schema.COLUMNS"))
-        return { rows: [column({ table_name: "t", column_name: "id" })] as T[] };
+        return {
+          rows: [column({ table_name: "t", column_name: "id" })] as T[],
+        };
       return { rows: [] as T[] };
     },
     async end() {},

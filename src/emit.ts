@@ -47,7 +47,9 @@ export function sqlLiteral(v: unknown, col: ColumnInfo): string {
     return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
   }
   if (Array.isArray(v)) {
-    const inner = v.map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`).join(",");
+    const inner = v
+      .map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`)
+      .join(",");
     return `'{${inner}}'`;
   }
   if (typeof v === "object") {
@@ -63,15 +65,21 @@ export function sqlLiteral(v: unknown, col: ColumnInfo): string {
  *              Falls back to DO NOTHING when the table has no unique target or no
  *              updatable columns (all columns are identity/generated/in the key).
  */
-function pgConflictClause(table: TableInfo, columns: ColumnInfo[], action: OnConflict | undefined): string {
+function pgConflictClause(
+  table: TableInfo,
+  columns: ColumnInfo[],
+  action: OnConflict | undefined,
+): string {
   if (!action) return "";
   if (action === "skip") return " ON CONFLICT DO NOTHING";
-  const target = table.primaryKey.length > 0 ? table.primaryKey : (table.uniques[0] ?? []);
+  const target =
+    table.primaryKey.length > 0 ? table.primaryKey : (table.uniques[0] ?? []);
   const targetSet = new Set(target);
   const setCols = columns
     .filter((c) => !targetSet.has(c.name) && !c.isIdentity && !c.isGenerated)
     .map((c) => `${IDENT(c.name)} = EXCLUDED.${IDENT(c.name)}`);
-  if (setCols.length === 0 || target.length === 0) return " ON CONFLICT DO NOTHING";
+  if (setCols.length === 0 || target.length === 0)
+    return " ON CONFLICT DO NOTHING";
   return ` ON CONFLICT (${target.map((n) => IDENT(n)).join(", ")}) DO UPDATE SET ${setCols.join(", ")}`;
 }
 
@@ -82,14 +90,22 @@ export function toSql(data: TableData[], opts: ScriptOptions = {}): string {
   for (const { table, rows, columns } of data) {
     if (rows.length === 0) continue;
     const colList = columns.map((c) => IDENT(c.name)).join(", ");
-    const override = overridesIdentity(columns) ? " OVERRIDING SYSTEM VALUE" : "";
+    const override = overridesIdentity(columns)
+      ? " OVERRIDING SYSTEM VALUE"
+      : "";
     parts.push(`-- ${table.key}: ${rows.length} rows`);
-    parts.push(`INSERT INTO ${qualified(table)} (${colList})${override} VALUES`);
+    parts.push(
+      `INSERT INTO ${qualified(table)} (${colList})${override} VALUES`,
+    );
     const values = rows.map((row) => {
       const tuple = columns.map((c) => sqlLiteral(row[c.name], c)).join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + pgConflictClause(table, columns, opts.onConflict) + ";");
+    parts.push(
+      values.join(",\n") +
+        pgConflictClause(table, columns, opts.onConflict) +
+        ";",
+    );
     parts.push("");
   }
 
@@ -105,7 +121,8 @@ export function toSql(data: TableData[], opts: ScriptOptions = {}): string {
 function sequenceResetSql(table: TableInfo): string | null {
   if (table.primaryKey.length !== 1) return null;
   const pk = table.columns.find((c) => c.name === table.primaryKey[0]);
-  if (!pk || pk.dataType !== "integer" || !(pk.isIdentity || pk.hasDefault)) return null;
+  if (!pk || pk.dataType !== "integer" || !(pk.isIdentity || pk.hasDefault))
+    return null;
   return (
     `SELECT setval(pg_get_serial_sequence('${table.schema}.${table.name}', '${pk.name}'), ` +
     `(SELECT COALESCE(MAX(${IDENT(pk.name)}), 1) FROM ${qualified(table)}), true);`
@@ -156,7 +173,9 @@ function copyEscape(s: string): string {
 
 /** Build a Postgres array literal `{"a","b"}` (same quoting as sqlLiteral). */
 function pgArrayLiteral(v: unknown[]): string {
-  const inner = v.map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`).join(",");
+  const inner = v
+    .map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`)
+    .join(",");
   return `{${inner}}`;
 }
 
@@ -205,7 +224,9 @@ export class CopySink implements RowSink {
     await this.client.query("BEGIN");
     if (this.opts.truncate && this.opts.tables?.length) {
       const list = this.opts.tables.map((t) => qualified(t)).reverse();
-      await this.client.query(`TRUNCATE ${list.join(", ")} RESTART IDENTITY CASCADE`);
+      await this.client.query(
+        `TRUNCATE ${list.join(", ")} RESTART IDENTITY CASCADE`,
+      );
     }
   }
 
@@ -246,7 +267,8 @@ export class CopySink implements RowSink {
     try {
       stream.end();
       await finished(stream);
-      if (this.currentCount > 0 && this.currentTable) this.filled.push(this.currentTable);
+      if (this.currentCount > 0 && this.currentTable)
+        this.filled.push(this.currentTable);
       this.stream = null;
       this.currentTable = null;
     } catch (err) {

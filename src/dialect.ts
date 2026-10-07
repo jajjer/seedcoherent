@@ -7,7 +7,12 @@
 import pg from "pg";
 import mysql from "mysql2/promise";
 import Database from "better-sqlite3";
-import { CopySink, insertData as insertDataPg, toSql, type ScriptOptions } from "./emit.js";
+import {
+  CopySink,
+  insertData as insertDataPg,
+  toSql,
+  type ScriptOptions,
+} from "./emit.js";
 import type { RowSink, TableData } from "./generate.js";
 import { introspect } from "./introspect.js";
 import { insertDataMysql, MysqlSink, toSqlMysql } from "./mysql-emit.js";
@@ -44,14 +49,21 @@ export interface Dialect {
   createProfiler(conn: Connection): Profiler;
   createSink(conn: Connection, opts: SinkOptions): SinkHandle;
   /** Insert already-materialized data (subset path) and return the row count. */
-  insertData(conn: Connection, data: TableData[], opts: SinkOptions): Promise<number>;
+  insertData(
+    conn: Connection,
+    data: TableData[],
+    opts: SinkOptions,
+  ): Promise<number>;
   toScript(data: TableData[], opts?: ScriptOptions): string;
 }
 
 /** Wraps a `pg.Client` as a driver-neutral Connection, keeping the raw client for COPY. */
 class PgConnection implements Connection {
   constructor(readonly client: pg.Client) {}
-  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+  query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }> {
     return this.client.query<any>(sql, params as any);
   }
   end(): Promise<void> {
@@ -77,10 +89,17 @@ const postgresDialect: Dialect = {
   },
   createProfiler(conn) {
     const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
-    return new SqlProfiler(conn, ident, (t) => `${ident(t.schema)}.${ident(t.name)}`);
+    return new SqlProfiler(
+      conn,
+      ident,
+      (t) => `${ident(t.schema)}.${ident(t.name)}`,
+    );
   },
   createSink(conn, opts) {
-    return new CopySink((conn as PgConnection).client, { truncate: opts.truncate, tables: opts.tables });
+    return new CopySink((conn as PgConnection).client, {
+      truncate: opts.truncate,
+      tables: opts.tables,
+    });
   },
   insertData(conn, data, opts) {
     return insertDataPg((conn as PgConnection).client, data, {
@@ -96,7 +115,10 @@ const postgresDialect: Dialect = {
 /** Wraps a `mysql2` connection as a driver-neutral Connection. */
 class MyConnection implements Connection {
   constructor(private conn: mysql.Connection) {}
-  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+  async query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }> {
     const [rows] = await this.conn.query(sql, params);
     return { rows: rows as unknown as T[] };
   }
@@ -112,7 +134,9 @@ const mysqlDialect: Dialect = {
   },
   defaultSchemas(connStr) {
     try {
-      const db = decodeURIComponent(new URL(connStr).pathname.replace(/^\//, ""));
+      const db = decodeURIComponent(
+        new URL(connStr).pathname.replace(/^\//, ""),
+      );
       return db ? [db] : [];
     } catch {
       return [];
@@ -126,13 +150,24 @@ const mysqlDialect: Dialect = {
   },
   createProfiler(conn) {
     const ident = (s: string) => "`" + s.replace(/`/g, "``") + "`";
-    return new SqlProfiler(conn, ident, (t) => `${ident(t.schema)}.${ident(t.name)}`);
+    return new SqlProfiler(
+      conn,
+      ident,
+      (t) => `${ident(t.schema)}.${ident(t.name)}`,
+    );
   },
   createSink(conn, opts) {
-    return new MysqlSink(conn, { truncate: opts.truncate, tables: opts.tables }, opts.batchSize);
+    return new MysqlSink(
+      conn,
+      { truncate: opts.truncate, tables: opts.tables },
+      opts.batchSize,
+    );
   },
   insertData(conn, data, opts) {
-    return insertDataMysql(conn, data, { truncate: opts.truncate, batchSize: opts.batchSize });
+    return insertDataMysql(conn, data, {
+      truncate: opts.truncate,
+      batchSize: opts.batchSize,
+    });
   },
   toScript(data, opts) {
     return toSqlMysql(data, opts);
@@ -146,7 +181,10 @@ const mysqlDialect: Dialect = {
  */
 class SqliteConnection implements Connection {
   constructor(readonly db: Database.Database) {}
-  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+  async query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }> {
     const stmt = this.db.prepare(sql);
     const args = (params ?? []) as unknown[];
     // `reader` is true for statements that return rows (SELECT and most PRAGMAs).
@@ -190,10 +228,17 @@ const sqliteDialect: Dialect = {
     return new SqlProfiler(conn, ident, (t) => ident(t.name));
   },
   createSink(conn, opts) {
-    return new SqliteSink(conn, { truncate: opts.truncate, tables: opts.tables }, opts.batchSize);
+    return new SqliteSink(
+      conn,
+      { truncate: opts.truncate, tables: opts.tables },
+      opts.batchSize,
+    );
   },
   insertData(conn, data, opts) {
-    return insertDataSqlite(conn, data, { truncate: opts.truncate, batchSize: opts.batchSize });
+    return insertDataSqlite(conn, data, {
+      truncate: opts.truncate,
+      batchSize: opts.batchSize,
+    });
   },
   toScript(data, opts) {
     return toSqlSqlite(data, opts);

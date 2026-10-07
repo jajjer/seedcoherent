@@ -46,59 +46,151 @@ interface NameRule {
 }
 
 /** Substring match on the joined name — for long, unambiguous fragments. */
-const has = (...frags: string[]) => (c: MatchCtx) => frags.some((f) => c.n.includes(f));
+const has =
+  (...frags: string[]) =>
+  (c: MatchCtx) =>
+    frags.some((f) => c.n.includes(f));
 /** Whole-token match — for short/ambiguous fragments ("ip", "lat", "name"). */
-const tok = (...names: string[]) => (c: MatchCtx) => names.some((x) => c.tokens.includes(x));
+const tok =
+  (...names: string[]) =>
+  (c: MatchCtx) =>
+    names.some((x) => c.tokens.includes(x));
 /** Combine matchers: true if any matches. */
-const or = (...fns: Array<(c: MatchCtx) => boolean>) => (c: MatchCtx) => fns.some((fn) => fn(c));
+const or =
+  (...fns: Array<(c: MatchCtx) => boolean>) =>
+  (c: MatchCtx) =>
+    fns.some((fn) => fn(c));
 
 /** Ordered — first match wins, so put specific rules before generic ones. */
 const NAME_RULES: NameRule[] = [
   { test: has("email"), gen: (f) => f.internet.email().toLowerCase() },
-  { test: tok("username", "login", "handle"), gen: (f) => f.internet.username().toLowerCase() },
+  {
+    test: tok("username", "login", "handle"),
+    gen: (f) => f.internet.username().toLowerCase(),
+  },
   { test: has("password", "passwd", "pwd"), gen: (f) => f.internet.password() },
   { test: has("firstname", "givenname"), gen: (f) => f.person.firstName() },
-  { test: has("lastname", "surname", "familyname"), gen: (f) => f.person.lastName() },
+  {
+    test: has("lastname", "surname", "familyname"),
+    gen: (f) => f.person.lastName(),
+  },
   { test: has("middlename"), gen: (f) => f.person.firstName() },
   { test: has("fullname", "displayname"), gen: (f) => f.person.fullName() },
-  { test: (c) => c.n === "name" || c.n.includes("contactname"), gen: (f) => f.person.fullName() },
-  { test: has("company", "organization", "organisation", "employer"), gen: (f) => f.company.name() },
-  { test: or(has("jobtitle", "occupation"), tok("position", "role")), gen: (f) => f.person.jobTitle() },
-  { test: or(has("phone", "mobile"), tok("cell", "fax")), gen: (f) => f.phone.number() },
-  { test: or(has("avatar", "profilepic", "thumbnail"), tok("photo", "picture", "image")), gen: (f) => f.image.url() },
+  {
+    test: (c) => c.n === "name" || c.n.includes("contactname"),
+    gen: (f) => f.person.fullName(),
+  },
+  {
+    test: has("company", "organization", "organisation", "employer"),
+    gen: (f) => f.company.name(),
+  },
+  {
+    test: or(has("jobtitle", "occupation"), tok("position", "role")),
+    gen: (f) => f.person.jobTitle(),
+  },
+  {
+    test: or(has("phone", "mobile"), tok("cell", "fax")),
+    gen: (f) => f.phone.number(),
+  },
+  {
+    test: or(
+      has("avatar", "profilepic", "thumbnail"),
+      tok("photo", "picture", "image"),
+    ),
+    gen: (f) => f.image.url(),
+  },
   { test: has("website", "homepage"), gen: (f) => f.internet.url() },
   { test: has("useragent"), gen: (f) => f.internet.userAgent() },
-  { test: or(has("ipaddress", "ipaddr"), tok("ip")), gen: (f) => f.internet.ipv4() },
+  {
+    test: or(has("ipaddress", "ipaddr"), tok("ip")),
+    gen: (f) => f.internet.ipv4(),
+  },
   { test: or(has("macaddress"), tok("mac")), gen: (f) => f.internet.mac() },
   { test: tok("url", "uri", "link", "href"), gen: (f) => f.internet.url() },
   { test: or(has("permalink"), tok("slug")), gen: (f) => f.lorem.slug() },
-  { test: has("addressline", "streetaddress", "street"), gen: (f) => f.location.streetAddress() },
+  {
+    test: has("addressline", "streetaddress", "street"),
+    gen: (f) => f.location.streetAddress(),
+  },
   { test: tok("address"), gen: (f) => f.location.streetAddress() },
   { test: tok("city", "town"), gen: (f) => f.location.city() },
   { test: tok("state", "province", "region"), gen: (f) => f.location.state() },
   { test: tok("country"), gen: (f) => f.location.country() },
-  { test: or(has("zipcode", "postalcode", "postcode"), tok("zip")), gen: (f) => f.location.zipCode() },
+  {
+    test: or(has("zipcode", "postalcode", "postcode"), tok("zip")),
+    gen: (f) => f.location.zipCode(),
+  },
   { test: or(has("latitude"), tok("lat")), gen: (f) => f.location.latitude() },
-  { test: or(has("longitude"), tok("lng", "lon")), gen: (f) => f.location.longitude() },
+  {
+    test: or(has("longitude"), tok("lng", "lon")),
+    gen: (f) => f.location.longitude(),
+  },
   { test: has("timezone"), gen: (f) => f.location.timeZone() },
   { test: tok("currency"), gen: (f) => f.finance.currencyCode() },
   { test: tok("iban"), gen: (f) => f.finance.iban() },
-  { test: has("creditcard", "cardnumber"), gen: (f) => f.finance.creditCardNumber() },
-  { test: or(has("price", "amount", "subtotal", "salary"), tok("cost", "total", "balance", "fee")), gen: (f) => Number(f.commerce.price()) },
+  {
+    test: has("creditcard", "cardnumber"),
+    gen: (f) => f.finance.creditCardNumber(),
+  },
+  {
+    test: or(
+      has("price", "amount", "subtotal", "salary"),
+      tok("cost", "total", "balance", "fee"),
+    ),
+    gen: (f) => Number(f.commerce.price()),
+  },
   { test: has("productname"), gen: (f) => f.commerce.productName() },
   { test: tok("product"), gen: (f) => f.commerce.product() },
   { test: has("color", "colour"), gen: (f) => f.color.human() },
-  { test: or(has("headline"), tok("title", "subject")), gen: (f) => f.lorem.sentence({ min: 2, max: 6 }).replace(/\.$/, "") },
-  { test: or(has("description"), tok("summary", "bio", "about", "body", "content", "message", "comment", "text", "note", "notes")), gen: (f) => f.lorem.paragraph() },
-  { test: or(has("firstseen", "createdat", "insertedat", "registeredat"), tok("created")), gen: (f) => f.date.past({ years: 2 }) },
-  { test: has("updatedat", "modifiedat", "lastseen", "lastlogin"), gen: (f) => f.date.recent({ days: 30 }) },
-  { test: has("deletedat", "expiresat", "expiredat"), gen: (f) => f.date.future({ years: 1 }) },
-  { test: or(has("birthdate", "dateofbirth", "birthday"), tok("dob")), gen: (f) => f.date.birthdate() },
+  {
+    test: or(has("headline"), tok("title", "subject")),
+    gen: (f) => f.lorem.sentence({ min: 2, max: 6 }).replace(/\.$/, ""),
+  },
+  {
+    test: or(
+      has("description"),
+      tok(
+        "summary",
+        "bio",
+        "about",
+        "body",
+        "content",
+        "message",
+        "comment",
+        "text",
+        "note",
+        "notes",
+      ),
+    ),
+    gen: (f) => f.lorem.paragraph(),
+  },
+  {
+    test: or(
+      has("firstseen", "createdat", "insertedat", "registeredat"),
+      tok("created"),
+    ),
+    gen: (f) => f.date.past({ years: 2 }),
+  },
+  {
+    test: has("updatedat", "modifiedat", "lastseen", "lastlogin"),
+    gen: (f) => f.date.recent({ days: 30 }),
+  },
+  {
+    test: has("deletedat", "expiresat", "expiredat"),
+    gen: (f) => f.date.future({ years: 1 }),
+  },
+  {
+    test: or(has("birthdate", "dateofbirth", "birthday"), tok("dob")),
+    gen: (f) => f.date.birthdate(),
+  },
   { test: tok("gender", "sex"), gen: (f) => f.person.sexType() },
   { test: tok("uuid", "guid"), gen: (f) => f.string.uuid() },
 ];
 
-type NumericRule = { test: (c: MatchCtx) => boolean; gen: (f: Faker, col: ColumnInfo) => number };
+type NumericRule = {
+  test: (c: MatchCtx) => boolean;
+  gen: (f: Faker, col: ColumnInfo) => number;
+};
 
 /**
  * Name rules for numeric columns. `NAME_RULES` only apply to text/date columns,
@@ -108,15 +200,34 @@ type NumericRule = { test: (c: MatchCtx) => boolean; gen: (f: Faker, col: Column
 const NUMERIC_NAME_RULES: NumericRule[] = [
   { test: tok("age"), gen: (f) => f.number.int({ min: 0, max: 95 }) },
   { test: tok("year"), gen: (f) => f.number.int({ min: 1970, max: 2025 }) },
-  { test: or(has("quantity"), tok("qty")), gen: (f) => f.number.int({ min: 1, max: 100 }) },
-  { test: tok("rating", "stars"), gen: (f) => f.number.int({ min: 1, max: 5 }) },
-  { test: tok("score", "points"), gen: (f) => f.number.int({ min: 0, max: 100 }) },
-  { test: or(has("percentage"), tok("percent", "discount")), gen: (f) => f.number.int({ min: 0, max: 100 }) },
+  {
+    test: or(has("quantity"), tok("qty")),
+    gen: (f) => f.number.int({ min: 1, max: 100 }),
+  },
+  {
+    test: tok("rating", "stars"),
+    gen: (f) => f.number.int({ min: 1, max: 5 }),
+  },
+  {
+    test: tok("score", "points"),
+    gen: (f) => f.number.int({ min: 0, max: 100 }),
+  },
+  {
+    test: or(has("percentage"), tok("percent", "discount")),
+    gen: (f) => f.number.int({ min: 0, max: 100 }),
+  },
   { test: tok("count"), gen: (f) => f.number.int({ min: 0, max: 1000 }) },
   {
-    test: or(has("price", "amount", "subtotal", "salary"), tok("cost", "total", "balance", "fee")),
+    test: or(
+      has("price", "amount", "subtotal", "salary"),
+      tok("cost", "total", "balance", "fee"),
+    ),
     gen: (f, col) => {
-      const val = f.number.float({ min: 0, max: 10_000, fractionDigits: Math.min(col.numericScale ?? 2, 6) });
+      const val = f.number.float({
+        min: 0,
+        max: 10_000,
+        fractionDigits: Math.min(col.numericScale ?? 2, 6),
+      });
       return col.dataType === "integer" ? Math.round(val) : val;
     },
   },
@@ -133,10 +244,19 @@ function generatorForType(col: ColumnInfo): Generator {
     case "uuid":
       return (f) => f.string.uuid();
     case "integer":
-      return (f) => f.number.int({ min: 0, max: col.udtName === "int2" ? 30000 : 1_000_000 });
+      return (f) =>
+        f.number.int({
+          min: 0,
+          max: col.udtName === "int2" ? 30000 : 1_000_000,
+        });
     case "decimal": {
       const scale = col.numericScale ?? 2;
-      return (f) => f.number.float({ min: 0, max: 100000, fractionDigits: Math.min(scale, 6) });
+      return (f) =>
+        f.number.float({
+          min: 0,
+          max: 100000,
+          fractionDigits: Math.min(scale, 6),
+        });
     }
     case "date":
       return (f) => f.date.past({ years: 3 });
@@ -159,10 +279,14 @@ function generatorForType(col: ColumnInfo): Generator {
       // Six colon-separated octets; Postgres widens this to macaddr8 as needed.
       return (f) => f.internet.mac();
     case "xml":
-      return (f) => `<record><id>${f.string.uuid()}</id><value>${f.lorem.word()}</value></record>`;
+      return (f) =>
+        `<record><id>${f.string.uuid()}</id><value>${f.lorem.word()}</value></record>`;
     case "array": {
-      const elemGen = col.elementType ? typeRefGenerator(col.elementType) : (f: Faker) => f.lorem.word();
-      return (f) => f.helpers.multiple(() => elemGen(f), { count: { min: 0, max: 3 } });
+      const elemGen = col.elementType
+        ? typeRefGenerator(col.elementType)
+        : (f: Faker) => f.lorem.word();
+      return (f) =>
+        f.helpers.multiple(() => elemGen(f), { count: { min: 0, max: 3 } });
     }
     case "composite":
       return compositeGenerator(col.compositeFields ?? []);
@@ -208,14 +332,26 @@ const JSON_RULES: NameRule[] = [
   },
   {
     test: tok("tags", "labels", "keywords", "categories"),
-    gen: (f) => f.helpers.multiple(() => f.lorem.word(), { count: { min: 1, max: 4 } }),
+    gen: (f) =>
+      f.helpers.multiple(() => f.lorem.word(), { count: { min: 1, max: 4 } }),
   },
   {
     test: tok("permissions", "scopes", "roles"),
-    gen: (f) => f.helpers.arrayElements(["read", "write", "create", "update", "delete", "admin"], { min: 1, max: 4 }),
+    gen: (f) =>
+      f.helpers.arrayElements(
+        ["read", "write", "create", "update", "delete", "admin"],
+        { min: 1, max: 4 },
+      ),
   },
   {
-    test: tok("settings", "preferences", "prefs", "config", "configuration", "options"),
+    test: tok(
+      "settings",
+      "preferences",
+      "prefs",
+      "config",
+      "configuration",
+      "options",
+    ),
     gen: (f) => ({
       theme: f.helpers.arrayElement(["light", "dark", "system"]),
       language: f.helpers.arrayElement(["en", "es", "fr", "de", "ja"]),
@@ -232,15 +368,25 @@ const JSON_RULES: NameRule[] = [
   },
   {
     test: tok("contact"),
-    gen: (f) => ({ email: f.internet.email().toLowerCase(), phone: f.phone.number() }),
+    gen: (f) => ({
+      email: f.internet.email().toLowerCase(),
+      phone: f.phone.number(),
+    }),
   },
   {
     test: or(has("pricing"), tok("price", "money", "cost")),
-    gen: (f) => ({ amount: Number(f.commerce.price()), currency: f.finance.currencyCode() }),
+    gen: (f) => ({
+      amount: Number(f.commerce.price()),
+      currency: f.finance.currencyCode(),
+    }),
   },
   {
     test: tok("profile"),
-    gen: (f) => ({ bio: f.lorem.sentence(), avatar: f.image.avatar(), website: f.internet.url() }),
+    gen: (f) => ({
+      bio: f.lorem.sentence(),
+      avatar: f.image.avatar(),
+      website: f.internet.url(),
+    }),
   },
 ];
 
@@ -311,7 +457,12 @@ function recordField(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "number") return String(v);
   if (typeof v === "boolean") return v ? "t" : "f";
-  const s = v instanceof Date ? v.toISOString() : typeof v === "object" ? JSON.stringify(v) : String(v);
+  const s =
+    v instanceof Date
+      ? v.toISOString()
+      : typeof v === "object"
+        ? JSON.stringify(v)
+        : String(v);
   // Quote every scalar so commas/spaces/empties survive; escape " and \ with a backslash.
   return `"${s.replace(/([\\"])/g, "\\$1")}"`;
 }
@@ -329,8 +480,11 @@ function rangeGenerator(sub: TypeRef | undefined): Generator {
       return `[${a},${(a + f.number.float({ min: 1, max: 1000, fractionDigits: 2 })).toFixed(2)})`;
     }
     const a = f.date.past({ years: 2 });
-    const b = new Date(a.getTime() + f.number.int({ min: 1, max: 365 }) * 86_400_000);
-    if (cat === "date") return `[${a.toISOString().slice(0, 10)},${b.toISOString().slice(0, 10)})`;
+    const b = new Date(
+      a.getTime() + f.number.int({ min: 1, max: 365 }) * 86_400_000,
+    );
+    if (cat === "date")
+      return `[${a.toISOString().slice(0, 10)},${b.toISOString().slice(0, 10)})`;
     return `["${a.toISOString()}","${b.toISOString()}")`;
   };
 }
@@ -370,7 +524,9 @@ export function inferGenerator(
   check?: ColumnCheck,
   dist?: DistSpec,
 ): Generator {
-  const qualified = overrides[`${table.name}.${col.name}`] ?? overrides[`${table.key}.${col.name}`];
+  const qualified =
+    overrides[`${table.name}.${col.name}`] ??
+    overrides[`${table.key}.${col.name}`];
   const bare = overrides[col.name];
   const override = qualified ?? bare;
 
@@ -442,7 +598,11 @@ function baseGenerator(table: TableInfo, col: ColumnInfo): Generator {
 }
 
 /** Wrap a base generator so its output satisfies a column's CHECK bounds. */
-function applyCheck(base: Generator, col: ColumnInfo, check: ColumnCheck): Generator {
+function applyCheck(
+  base: Generator,
+  col: ColumnInfo,
+  check: ColumnCheck,
+): Generator {
   // A membership set fully determines the valid values — draw straight from it.
   if (check.in && check.in.length > 0) {
     const values = check.in;
@@ -460,7 +620,10 @@ function applyCheck(base: Generator, col: ColumnInfo, check: ColumnCheck): Gener
     return boundedNumber(col, check);
   }
 
-  if (col.dataType === "text" && (check.minLength !== undefined || check.maxLength !== undefined)) {
+  if (
+    col.dataType === "text" &&
+    (check.minLength !== undefined || check.maxLength !== undefined)
+  ) {
     return (f) => constrainLength(String(base(f)), col, check, f);
   }
 
@@ -471,8 +634,14 @@ function applyCheck(base: Generator, col: ColumnInfo, check: ColumnCheck): Gener
 function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
   const SPAN = 1000;
   if (col.dataType === "integer") {
-    let lo = check.min !== undefined ? Math.ceil(check.min) + (check.minExclusive ? 1 : 0) : undefined;
-    let hi = check.max !== undefined ? Math.floor(check.max) - (check.maxExclusive ? 1 : 0) : undefined;
+    let lo =
+      check.min !== undefined
+        ? Math.ceil(check.min) + (check.minExclusive ? 1 : 0)
+        : undefined;
+    let hi =
+      check.max !== undefined
+        ? Math.floor(check.max) - (check.maxExclusive ? 1 : 0)
+        : undefined;
     if (lo === undefined) lo = hi! - SPAN;
     if (hi === undefined) hi = lo + SPAN;
     if (lo > hi) hi = lo;
@@ -481,8 +650,14 @@ function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
   }
   const scale = Math.min(col.numericScale ?? 2, 6);
   const eps = Math.pow(10, -scale);
-  let lo = check.min !== undefined ? check.min + (check.minExclusive ? eps : 0) : undefined;
-  let hi = check.max !== undefined ? check.max - (check.maxExclusive ? eps : 0) : undefined;
+  let lo =
+    check.min !== undefined
+      ? check.min + (check.minExclusive ? eps : 0)
+      : undefined;
+  let hi =
+    check.max !== undefined
+      ? check.max - (check.maxExclusive ? eps : 0)
+      : undefined;
   if (lo === undefined) lo = Math.min(0, hi!);
   if (hi === undefined) hi = lo + SPAN;
   if (lo > hi) hi = lo;
@@ -539,8 +714,10 @@ function parseSeq(c: { s: string; i: number }): ReNode {
 function parseRep(c: { s: string; i: number }): ReNode {
   const atom = parseAtom(c);
   const ch = c.s[c.i];
-  if (ch === "*") return (c.i++, { t: "rep", node: atom, min: 0, max: MAX_REP });
-  if (ch === "+") return (c.i++, { t: "rep", node: atom, min: 1, max: MAX_REP });
+  if (ch === "*")
+    return (c.i++, { t: "rep", node: atom, min: 0, max: MAX_REP });
+  if (ch === "+")
+    return (c.i++, { t: "rep", node: atom, min: 1, max: MAX_REP });
   if (ch === "?") return (c.i++, { t: "rep", node: atom, min: 0, max: 1 });
   if (ch === "{") {
     const close = c.s.indexOf("}", c.i);
@@ -570,7 +747,8 @@ function parseAtom(c: { s: string; i: number }): ReNode {
   if (ch === "[") return parseClass(c);
   if (ch === "\\") return parseEscape(c);
   if (ch === ".") return (c.i++, { t: "class", chars: expandRange("a", "z") });
-  if (ch === undefined || "*+?{}|)".includes(ch)) throw new Error("unexpected token");
+  if (ch === undefined || "*+?{}|)".includes(ch))
+    throw new Error("unexpected token");
   c.i++;
   return { t: "lit", s: ch };
 }
@@ -578,7 +756,10 @@ function parseAtom(c: { s: string; i: number }): ReNode {
 function parseClass(c: { s: string; i: number }): ReNode {
   c.i++; // consume [
   let negate = false;
-  if (c.s[c.i] === "^") (negate = true), c.i++;
+  if (c.s[c.i] === "^") {
+    negate = true;
+    c.i++;
+  }
   const chars: string[] = [];
   while (c.i < c.s.length && c.s[c.i] !== "]") {
     let lo: string;
@@ -604,7 +785,11 @@ function parseClass(c: { s: string; i: number }): ReNode {
   if (c.s[c.i] !== "]") throw new Error("unterminated class");
   c.i++;
   if (negate) {
-    const base = new Set([...expandRange("a", "z"), ...expandRange("A", "Z"), ...expandRange("0", "9")]);
+    const base = new Set([
+      ...expandRange("a", "z"),
+      ...expandRange("A", "Z"),
+      ...expandRange("0", "9"),
+    ]);
     for (const ch of chars) base.delete(ch);
     return { t: "class", chars: [...base] };
   }
@@ -623,14 +808,21 @@ function parseEscape(c: { s: string; i: number }): ReNode {
 /** Character set for a class shorthand (`\d`, `\w`, `\s`), or null for a literal escape. */
 function classEscape(ch: string | undefined): string[] | null {
   if (ch === "d") return expandRange("0", "9");
-  if (ch === "w") return [...expandRange("a", "z"), ...expandRange("A", "Z"), ...expandRange("0", "9"), "_"];
+  if (ch === "w")
+    return [
+      ...expandRange("a", "z"),
+      ...expandRange("A", "Z"),
+      ...expandRange("0", "9"),
+      "_",
+    ];
   if (ch === "s") return [" "];
   return null;
 }
 
 function expandRange(lo: string, hi: string): string[] {
   const out: string[] = [];
-  for (let cc = lo.charCodeAt(0); cc <= hi.charCodeAt(0); cc++) out.push(String.fromCharCode(cc));
+  for (let cc = lo.charCodeAt(0); cc <= hi.charCodeAt(0); cc++)
+    out.push(String.fromCharCode(cc));
   return out;
 }
 
@@ -641,7 +833,10 @@ function emitNode(node: ReNode, f: Faker): string {
     case "alt":
       return emitNode(f.helpers.arrayElement(node.opts), f);
     case "rep": {
-      const n = f.number.int({ min: node.min, max: Math.max(node.min, node.max) });
+      const n = f.number.int({
+        min: node.min,
+        max: Math.max(node.min, node.max),
+      });
       let s = "";
       for (let k = 0; k < n; k++) s += emitNode(node.node, f);
       return s;
@@ -654,7 +849,12 @@ function emitNode(node: ReNode, f: Faker): string {
 }
 
 /** Pad or truncate a string to satisfy length bounds (and varchar(n)). */
-function constrainLength(s: string, col: ColumnInfo, check: ColumnCheck, f: Faker): string {
+function constrainLength(
+  s: string,
+  col: ColumnInfo,
+  check: ColumnCheck,
+  f: Faker,
+): string {
   const min = check.minLength ?? 0;
   let max = check.maxLength ?? Infinity;
   if (col.maxLength) max = Math.min(max, col.maxLength);
@@ -670,7 +870,10 @@ function constrainLength(s: string, col: ColumnInfo, check: ColumnCheck, f: Fake
  * exists, hash partitioning, an expression key, or unparseable bounds) — the
  * caller then falls back to the ordinary generator.
  */
-export function partitionKeyGenerator(col: ColumnInfo, part: PartitionInfo): Generator | null {
+export function partitionKeyGenerator(
+  col: ColumnInfo,
+  part: PartitionInfo,
+): Generator | null {
   // Only the first key column drives routing here; DEFAULT/hash/expression keys
   // accept any value, so no constraint is required.
   if (part.hasDefault || part.strategy === "hash") return null;
@@ -682,7 +885,9 @@ export function partitionKeyGenerator(col: ColumnInfo, part: PartitionInfo): Gen
     return (f) => f.helpers.arrayElement(values);
   }
 
-  const ranges = (part.ranges ?? []).filter((r) => r.from !== null || r.to !== null);
+  const ranges = (part.ranges ?? []).filter(
+    (r) => r.from !== null || r.to !== null,
+  );
   if (ranges.length === 0) return null;
   return (f) => {
     const r = f.helpers.arrayElement(ranges);
@@ -692,7 +897,8 @@ export function partitionKeyGenerator(col: ColumnInfo, part: PartitionInfo): Gen
 
 /** Coerce a raw bound/list literal string to the column's JS value type. */
 function coerce(raw: string, col: ColumnInfo): unknown {
-  if (col.dataType === "integer" || col.dataType === "decimal") return Number(raw);
+  if (col.dataType === "integer" || col.dataType === "decimal")
+    return Number(raw);
   if (col.dataType === "boolean") return /^(t|true|1)$/i.test(raw);
   return raw;
 }
@@ -701,19 +907,38 @@ const RANGE_SPAN_MS = 1000 * 60 * 60 * 24 * 365; // ~1y fallback for open-ended 
 const RANGE_SPAN_NUM = 1000;
 
 /** Generate a value within [from, to) for a RANGE partition, typed by column. */
-function valueInRange(from: string | null, to: string | null, col: ColumnInfo, f: Faker): unknown {
+function valueInRange(
+  from: string | null,
+  to: string | null,
+  col: ColumnInfo,
+  f: Faker,
+): unknown {
   const cat = col.dataType;
   if (cat === "timestamp" || cat === "date") {
-    const lo = from !== null ? new Date(from).getTime() : new Date(to!).getTime() - RANGE_SPAN_MS;
-    const hi = to !== null ? new Date(to!).getTime() : new Date(from!).getTime() + RANGE_SPAN_MS;
+    const lo =
+      from !== null
+        ? new Date(from).getTime()
+        : new Date(to!).getTime() - RANGE_SPAN_MS;
+    const hi =
+      to !== null
+        ? new Date(to!).getTime()
+        : new Date(from!).getTime() + RANGE_SPAN_MS;
     const d = new Date(f.number.int({ min: lo, max: Math.max(lo, hi - 1) }));
     return cat === "date" ? d.toISOString().slice(0, 10) : d;
   }
   if (cat === "integer" || cat === "decimal") {
     const lo = from !== null ? Number(from) : Number(to) - RANGE_SPAN_NUM;
     const hi = to !== null ? Number(to) : Number(from) + RANGE_SPAN_NUM;
-    if (cat === "integer") return f.number.int({ min: Math.ceil(lo), max: Math.max(Math.ceil(lo), Math.floor(hi) - 1) });
-    return f.number.float({ min: lo, max: Math.max(lo, hi), fractionDigits: Math.min(col.numericScale ?? 2, 6) });
+    if (cat === "integer")
+      return f.number.int({
+        min: Math.ceil(lo),
+        max: Math.max(Math.ceil(lo), Math.floor(hi) - 1),
+      });
+    return f.number.float({
+      min: lo,
+      max: Math.max(lo, hi),
+      fractionDigits: Math.min(col.numericScale ?? 2, 6),
+    });
   }
   // Text (or anything else) partitioned by range: the inclusive lower bound is a
   // valid, in-partition value — good enough without inventing an ordering.

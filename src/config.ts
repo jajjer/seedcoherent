@@ -23,7 +23,10 @@ export async function loadConfig(explicitPath?: string): Promise<Config> {
       return (mod.default ?? mod) as Config;
     } catch (err: any) {
       if (err?.code === "ENOENT" || err?.code === "ERR_MODULE_NOT_FOUND") {
-        if (explicitPath) throw new Error(`Config file not found: ${explicitPath}`);
+        if (explicitPath)
+          throw new Error(`Config file not found: ${explicitPath}`, {
+            cause: err,
+          });
         continue; // try next default name
       }
       throw err;
@@ -37,10 +40,12 @@ export function parseRowSpecs(specs: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const spec of specs) {
     const eq = spec.lastIndexOf("=");
-    if (eq === -1) throw new Error(`Invalid --rows spec "${spec}" (expected table=count)`);
+    if (eq === -1)
+      throw new Error(`Invalid --rows spec "${spec}" (expected table=count)`);
     const table = spec.slice(0, eq).trim();
     const count = Number(spec.slice(eq + 1));
-    if (!Number.isFinite(count) || count < 0) throw new Error(`Invalid row count in "${spec}"`);
+    if (!Number.isFinite(count) || count < 0)
+      throw new Error(`Invalid row count in "${spec}"`);
     out[table] = Math.floor(count);
   }
   return out;
@@ -56,11 +61,18 @@ export function parseNullRateSpecs(specs: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const spec of specs) {
     const eq = spec.lastIndexOf("=");
-    if (eq === -1) throw new Error(`Invalid --null-rate spec "${spec}" (expected column=rate)`);
+    if (eq === -1)
+      throw new Error(
+        `Invalid --null-rate spec "${spec}" (expected column=rate)`,
+      );
     const column = spec.slice(0, eq).trim();
-    if (!column) throw new Error(`Invalid --null-rate spec "${spec}" (empty column)`);
+    if (!column)
+      throw new Error(`Invalid --null-rate spec "${spec}" (empty column)`);
     const rate = Number(spec.slice(eq + 1));
-    if (!isValidRate(rate)) throw new Error(`Invalid null rate in "${spec}" (need a number in [0, 1])`);
+    if (!isValidRate(rate))
+      throw new Error(
+        `Invalid null rate in "${spec}" (need a number in [0, 1])`,
+      );
     out[column] = rate;
   }
   return out;
@@ -80,7 +92,9 @@ export function validateNullRates(nullRates?: Record<string, number>): void {
   if (!nullRates) return;
   for (const [column, rate] of Object.entries(nullRates)) {
     if (typeof rate !== "number" || !isValidRate(rate)) {
-      throw new Error(`Invalid null rate for "${column}": ${rate} (need a number in [0, 1])`);
+      throw new Error(
+        `Invalid null rate for "${column}": ${rate} (need a number in [0, 1])`,
+      );
     }
   }
 }
@@ -100,7 +114,10 @@ export function parseDistSpecs(specs: string[]): Record<string, DistSpec> {
   const out: Record<string, DistSpec> = {};
   for (const spec of specs) {
     const eq = spec.indexOf("=");
-    if (eq === -1) throw new Error(`Invalid --distribution spec "${spec}" (expected column=kind)`);
+    if (eq === -1)
+      throw new Error(
+        `Invalid --distribution spec "${spec}" (expected column=kind)`,
+      );
     const column = spec.slice(0, eq).trim();
     const rhs = spec.slice(eq + 1);
     // Split off the kind; `weighted:` keeps its whole `v=w,...` body as the arg.
@@ -108,36 +125,56 @@ export function parseDistSpecs(specs: string[]): Record<string, DistSpec> {
     const kind = colon === -1 ? rhs : rhs.slice(0, colon);
     const arg = colon === -1 ? undefined : rhs.slice(colon + 1);
     if (kind === "uniform") {
-      if (arg !== undefined) throw new Error(`uniform takes no argument in "${spec}"`);
+      if (arg !== undefined)
+        throw new Error(`uniform takes no argument in "${spec}"`);
       out[column] = "uniform";
     } else if (kind === "zipf") {
       if (arg === undefined) {
         out[column] = "zipf";
       } else {
         const skew = Number(arg);
-        if (!Number.isFinite(skew) || skew <= 0) throw new Error(`Invalid skew in "${spec}" (need > 0)`);
+        if (!Number.isFinite(skew) || skew <= 0)
+          throw new Error(`Invalid skew in "${spec}" (need > 0)`);
         out[column] = { kind: "zipf", skew };
       }
     } else if (kind === "weighted") {
       out[column] = { kind: "weighted", weights: parseWeights(arg, spec) };
     } else {
-      throw new Error(`Unknown distribution "${kind}" in "${spec}" (use uniform, zipf, or weighted)`);
+      throw new Error(
+        `Unknown distribution "${kind}" in "${spec}" (use uniform, zipf, or weighted)`,
+      );
     }
   }
   return out;
 }
 
 /** Parse a `weighted:` body — `v1=w1,v2=w2,...` — into value/weight pairs. */
-function parseWeights(body: string | undefined, spec: string): Array<{ value: unknown; weight: number }> {
-  if (!body) throw new Error(`weighted needs value=weight pairs in "${spec}" (e.g. weighted:a=0.9,b=0.1)`);
-  const pairs = body.split(",").map((s) => s.trim()).filter(Boolean);
-  if (pairs.length === 0) throw new Error(`Empty weights in "${spec}" (expected weighted:a=0.9,b=0.1)`);
+function parseWeights(
+  body: string | undefined,
+  spec: string,
+): Array<{ value: unknown; weight: number }> {
+  if (!body)
+    throw new Error(
+      `weighted needs value=weight pairs in "${spec}" (e.g. weighted:a=0.9,b=0.1)`,
+    );
+  const pairs = body
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (pairs.length === 0)
+    throw new Error(
+      `Empty weights in "${spec}" (expected weighted:a=0.9,b=0.1)`,
+    );
   const weights = pairs.map((pair) => {
     const eq = pair.lastIndexOf("=");
-    if (eq === -1) throw new Error(`Invalid weight "${pair}" in "${spec}" (expected value=weight)`);
+    if (eq === -1)
+      throw new Error(
+        `Invalid weight "${pair}" in "${spec}" (expected value=weight)`,
+      );
     const value = coerceLiteral(pair.slice(0, eq).trim());
     const weight = Number(pair.slice(eq + 1));
-    if (!Number.isFinite(weight) || weight <= 0) throw new Error(`Invalid weight for "${pair}" in "${spec}" (need > 0)`);
+    if (!Number.isFinite(weight) || weight <= 0)
+      throw new Error(`Invalid weight for "${pair}" in "${spec}" (need > 0)`);
     return { value, weight };
   });
   return weights;
@@ -161,8 +198,12 @@ function coerceLiteral(raw: string): unknown {
 export function parseLinkGroups(specs: string[]): string[][] {
   const out: string[][] = [];
   for (const spec of specs) {
-    const cols = spec.split("=").map((s) => s.trim()).filter(Boolean);
-    if (cols.length === 0) throw new Error(`Invalid --link group "${spec}" (expected a=b[=c...])`);
+    const cols = spec
+      .split("=")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (cols.length === 0)
+      throw new Error(`Invalid --link group "${spec}" (expected a=b[=c...])`);
     out.push(cols);
   }
   return out;
@@ -178,24 +219,36 @@ export function parseLinkGroups(specs: string[]): string[][] {
  * true), falling back to the raw string. Keyed by "table.column",
  * "schema.table.column", or bare "column" — same forms as name inference.
  */
-export function parseColumnSpecs(specs: string[]): Record<string, ColumnOverride> {
+export function parseColumnSpecs(
+  specs: string[],
+): Record<string, ColumnOverride> {
   const out: Record<string, ColumnOverride> = {};
   for (const spec of specs) {
     // Split on the first '=': the column key never contains '=', but a literal
     // value on the right-hand side might (e.g. value:a=b).
     const eq = spec.indexOf("=");
-    if (eq === -1) throw new Error(`Invalid --column spec "${spec}" (expected column=generator)`);
+    if (eq === -1)
+      throw new Error(
+        `Invalid --column spec "${spec}" (expected column=generator)`,
+      );
     const column = spec.slice(0, eq).trim();
     const rhs = spec.slice(eq + 1);
-    if (!column) throw new Error(`Invalid --column spec "${spec}" (empty column)`);
-    if (!rhs) throw new Error(`Invalid --column spec "${spec}" (empty generator)`);
+    if (!column)
+      throw new Error(`Invalid --column spec "${spec}" (empty column)`);
+    if (!rhs)
+      throw new Error(`Invalid --column spec "${spec}" (empty generator)`);
 
     if (rhs.startsWith("value:")) {
       out[column] = { value: coerceLiteral(rhs.slice("value:".length)) };
     } else if (rhs.startsWith("values:")) {
-      const items = rhs.slice("values:".length).split(",").map((s) => s.trim());
+      const items = rhs
+        .slice("values:".length)
+        .split(",")
+        .map((s) => s.trim());
       if (items.length === 0 || (items.length === 1 && items[0] === "")) {
-        throw new Error(`Empty values list in "${spec}" (expected values:a,b,c)`);
+        throw new Error(
+          `Empty values list in "${spec}" (expected values:a,b,c)`,
+        );
       }
       out[column] = { values: items.map(coerceLiteral) };
     } else {

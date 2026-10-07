@@ -16,11 +16,18 @@ export class MysqlRowFetcher implements RowFetcher {
     const order = table.primaryKey.length
       ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
       : "";
-    const res = await this.conn.query<Row>(`SELECT * FROM ${qual(table)}${order} LIMIT ?`, [limit]);
+    const res = await this.conn.query<Row>(
+      `SELECT * FROM ${qual(table)}${order} LIMIT ?`,
+      [limit],
+    );
     return res.rows;
   }
 
-  async fetchByKeys(table: TableInfo, columns: string[], keys: unknown[][]): Promise<Row[]> {
+  async fetchByKeys(
+    table: TableInfo,
+    columns: string[],
+    keys: unknown[][],
+  ): Promise<Row[]> {
     if (keys.length === 0) return [];
     const rows: Row[] = [];
     for (let i = 0; i < keys.length; i += KEY_CHUNK) {
@@ -53,7 +60,9 @@ export class MysqlRowFetcher implements RowFetcher {
   }
 
   async maxInt(table: TableInfo, column: string): Promise<number | null> {
-    const res = await this.conn.query<Row>(`SELECT MAX(${ident(column)}) AS m FROM ${qual(table)}`);
+    const res = await this.conn.query<Row>(
+      `SELECT MAX(${ident(column)}) AS m FROM ${qual(table)}`,
+    );
     return toInt(res.rows[0]?.m);
   }
 }

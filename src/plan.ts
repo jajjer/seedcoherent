@@ -4,7 +4,13 @@
  * touching the target database.
  */
 
-import { buildData, rowCount, type AppendContext, type Row, type TableData } from "./generate.js";
+import {
+  buildData,
+  rowCount,
+  type AppendContext,
+  type Row,
+  type TableData,
+} from "./generate.js";
 import type { Config, Schema, TableInfo } from "./types.js";
 
 export interface TablePlan {
@@ -44,7 +50,10 @@ export function buildPlan(
     ...config,
     defaultRows: Math.min(config.defaultRows ?? 10, sampleSize),
     rows: Object.fromEntries(
-      Object.entries(config.rows ?? {}).map(([k, v]) => [k, Math.min(v, sampleSize)]),
+      Object.entries(config.rows ?? {}).map(([k, v]) => [
+        k,
+        Math.min(v, sampleSize),
+      ]),
     ),
   };
   const sampled = new Map<string, Row[]>();
@@ -80,7 +89,10 @@ export function buildAppendPlan(
   const capped: Config = {
     ...config,
     rows: Object.fromEntries(
-      Object.entries(config.rows ?? {}).map(([k, v]) => [k, Math.min(v, sampleSize)]),
+      Object.entries(config.rows ?? {}).map(([k, v]) => [
+        k,
+        Math.min(v, sampleSize),
+      ]),
     ),
   };
   const sampled = new Map<string, Row[]>();
@@ -125,7 +137,10 @@ export function buildSubsetPlan(
 }
 
 /** Render a plan as the human-readable dry-run report. */
-export function formatPlan(plan: Plan, opts: { subset?: boolean; append?: boolean } = {}): string {
+export function formatPlan(
+  plan: Plan,
+  opts: { subset?: boolean; append?: boolean } = {},
+): string {
   const header = opts.subset
     ? "Subset plan (dry run — source read, nothing written):"
     : opts.append
@@ -134,9 +149,13 @@ export function formatPlan(plan: Plan, opts: { subset?: boolean; append?: boolea
   const out: string[] = [header, ""];
 
   const width = plan.tables.reduce((w, t) => Math.max(w, t.key.length), 5);
-  out.push(`  ${"#".padStart(3)}  ${"table".padEnd(width)}  ${"rows".padStart(9)}`);
+  out.push(
+    `  ${"#".padStart(3)}  ${"table".padEnd(width)}  ${"rows".padStart(9)}`,
+  );
   plan.tables.forEach((t, i) => {
-    const marks = [t.cyclic ? "cyclic" : "", t.skipped ? "skipped" : ""].filter(Boolean).join(", ");
+    const marks = [t.cyclic ? "cyclic" : "", t.skipped ? "skipped" : ""]
+      .filter(Boolean)
+      .join(", ");
     const suffix = marks ? `  (${marks})` : "";
     out.push(
       `  ${String(i + 1).padStart(3)}  ${t.key.padEnd(width)}  ${String(t.rows).padStart(9)}${suffix}`,

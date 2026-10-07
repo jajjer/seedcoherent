@@ -38,13 +38,19 @@ function peopleTable(extra = {}): Schema {
 }
 
 test("full_name is the row's own first_name + last_name", () => {
-  for (const r of rowsFor(build(peopleTable(), { rows: { people: 200 }, seed: 1 }), "public.people")) {
+  for (const r of rowsFor(
+    build(peopleTable(), { rows: { people: 200 }, seed: 1 }),
+    "public.people",
+  )) {
     assert.equal(r.full_name, `${r.first_name} ${r.last_name}`);
   }
 });
 
 test("email and username derive from the row's first + last name", () => {
-  for (const r of rowsFor(build(peopleTable(), { rows: { people: 200 }, seed: 2 }), "public.people")) {
+  for (const r of rowsFor(
+    build(peopleTable(), { rows: { people: 200 }, seed: 2 }),
+    "public.people",
+  )) {
     const first = String(r.first_name).toLowerCase();
     const last = String(r.last_name).toLowerCase();
     const email = String(r.email);
@@ -64,41 +70,65 @@ test("email and username derive from the row's first + last name", () => {
 test("a gender/sex column biases the first name (male stays male)", () => {
   const s = schema(
     table("people", {
-      columns: [idCol(), col("first_name"), col("last_name"), col("sex", {
-        udtName: "gender_enum",
-        dataType: "enum",
-        enumValues: ["male", "female"],
-      })],
+      columns: [
+        idCol(),
+        col("first_name"),
+        col("last_name"),
+        col("sex", {
+          udtName: "gender_enum",
+          dataType: "enum",
+          enumValues: ["male", "female"],
+        }),
+      ],
       primaryKey: ["id"],
     }),
   );
   // Pin sex=male for every row; names should be drawn as male first names, and
   // the deterministic seed makes the set stable.
-  const config: Config = { rows: { people: 50 }, seed: 3, columns: { "people.sex": { value: "male" } } };
+  const config: Config = {
+    rows: { people: 50 },
+    seed: 3,
+    columns: { "people.sex": { value: "male" } },
+  };
   const rows = rowsFor(build(s, config), "public.people");
   for (const r of rows) assert.equal(r.sex, "male");
   // Sanity: a clearly female-only name shouldn't appear for a male-pinned column.
   const names = new Set(rows.map((r) => r.first_name));
-  assert.ok(!names.has("Mary") && !names.has("Patricia"), "unexpected female name for sex=male");
+  assert.ok(
+    !names.has("Mary") && !names.has("Patricia"),
+    "unexpected female name for sex=male",
+  );
 });
 
 test("a female-pinned sex column yields female first names", () => {
   const s = schema(
     table("people", {
-      columns: [idCol(), col("first_name"), col("last_name"), col("sex", {
-        udtName: "gender_enum",
-        dataType: "enum",
-        enumValues: ["male", "female"],
-      })],
+      columns: [
+        idCol(),
+        col("first_name"),
+        col("last_name"),
+        col("sex", {
+          udtName: "gender_enum",
+          dataType: "enum",
+          enumValues: ["male", "female"],
+        }),
+      ],
       primaryKey: ["id"],
     }),
   );
-  const config: Config = { rows: { people: 50 }, seed: 9, columns: { "people.sex": { value: "female" } } };
+  const config: Config = {
+    rows: { people: 50 },
+    seed: 9,
+    columns: { "people.sex": { value: "female" } },
+  };
   const rows = rowsFor(build(s, config), "public.people");
   for (const r of rows) assert.equal(r.sex, "female");
   // A clearly male-only name shouldn't appear for a female-pinned column.
   const names = new Set(rows.map((r) => r.first_name));
-  assert.ok(!names.has("James") && !names.has("Robert"), "unexpected male name for sex=female");
+  assert.ok(
+    !names.has("James") && !names.has("Robert"),
+    "unexpected male name for sex=female",
+  );
 });
 
 test("a pinned first_name anchors the derived columns", () => {
@@ -110,20 +140,34 @@ test("a pinned first_name anchors the derived columns", () => {
   for (const r of rowsFor(build(peopleTable(), config), "public.people")) {
     assert.equal(r.first_name, "Zelda");
     assert.equal(r.full_name, `Zelda ${r.last_name}`);
-    assert.ok(String(r.email).includes("zelda") || String(r.email).includes(String(r.last_name).toLowerCase()));
+    assert.ok(
+      String(r.email).includes("zelda") ||
+        String(r.email).includes(String(r.last_name).toLowerCase()),
+    );
   }
 });
 
 test("nullable coherence columns that came out null stay null", () => {
   const s = schema(
     table("people", {
-      columns: [idCol(), col("first_name"), col("last_name"), col("email", { nullable: true })],
+      columns: [
+        idCol(),
+        col("first_name"),
+        col("last_name"),
+        col("email", { nullable: true }),
+      ],
       primaryKey: ["id"],
     }),
   );
-  const rows = rowsFor(build(s, { rows: { people: 300 }, seed: 5 }), "public.people");
+  const rows = rowsFor(
+    build(s, { rows: { people: 300 }, seed: 5 }),
+    "public.people",
+  );
   const nulls = rows.filter((r) => r.email === null);
-  assert.ok(nulls.length > 0, "expected some null emails from the null probability");
+  assert.ok(
+    nulls.length > 0,
+    "expected some null emails from the null probability",
+  );
 });
 
 test("state, zip and country describe the same US place", () => {
@@ -133,9 +177,16 @@ test("state, zip and country describe the same US place", () => {
       primaryKey: ["id"],
     }),
   );
-  const rows = rowsFor(build(s, { rows: { addresses: 200 }, seed: 6 }), "public.addresses");
+  const rows = rowsFor(
+    build(s, { rows: { addresses: 200 }, seed: 6 }),
+    "public.addresses",
+  );
   for (const r of rows) {
-    assert.match(String(r.state), /^[A-Z]{2}$/, `state ${r.state} is not a 2-letter abbr`);
+    assert.match(
+      String(r.state),
+      /^[A-Z]{2}$/,
+      `state ${r.state} is not a 2-letter abbr`,
+    );
     assert.match(String(r.zip), /^\d{5}(-\d{4})?$/, `zip ${r.zip} malformed`);
     assert.equal(r.country, "United States");
   }
@@ -148,7 +199,10 @@ test("the city sits in the row's own state", () => {
       primaryKey: ["id"],
     }),
   );
-  const rows = rowsFor(build(s, { rows: { addresses: 300 }, seed: 6 }), "public.addresses");
+  const rows = rowsFor(
+    build(s, { rows: { addresses: 300 }, seed: 6 }),
+    "public.addresses",
+  );
   let checked = 0;
   for (const r of rows) {
     const cities = STATE_CITIES[String(r.state)];
@@ -159,7 +213,10 @@ test("the city sits in the row's own state", () => {
     );
     checked++;
   }
-  assert.ok(checked > rows.length / 2, "expected most rows to hit a covered state");
+  assert.ok(
+    checked > rows.length / 2,
+    "expected most rows to hit a covered state",
+  );
 });
 
 test("state + city cohere even without a zip column", () => {
@@ -169,11 +226,22 @@ test("state + city cohere even without a zip column", () => {
       primaryKey: ["id"],
     }),
   );
-  const rows = rowsFor(build(s, { rows: { locations: 200 }, seed: 12 }), "public.locations");
+  const rows = rowsFor(
+    build(s, { rows: { locations: 200 }, seed: 12 }),
+    "public.locations",
+  );
   for (const r of rows) {
-    assert.match(String(r.state), /^[A-Z]{2}$/, `state ${r.state} is not a 2-letter abbr`);
+    assert.match(
+      String(r.state),
+      /^[A-Z]{2}$/,
+      `state ${r.state} is not a 2-letter abbr`,
+    );
     const cities = STATE_CITIES[String(r.state)];
-    if (cities) assert.ok(cities.includes(String(r.city)), `city ${r.city} not in ${r.state}`);
+    if (cities)
+      assert.ok(
+        cities.includes(String(r.city)),
+        `city ${r.city} not in ${r.state}`,
+      );
   }
 });
 
@@ -190,7 +258,10 @@ test("billing and shipping addresses stay independent groups", () => {
       primaryKey: ["id"],
     }),
   );
-  const rows = rowsFor(build(s, { rows: { orders: 300 }, seed: 7 }), "public.orders");
+  const rows = rowsFor(
+    build(s, { rows: { orders: 300 }, seed: 7 }),
+    "public.orders",
+  );
   for (const r of rows) {
     assert.match(String(r.billing_state), /^[A-Z]{2}$/);
     assert.match(String(r.shipping_state), /^[A-Z]{2}$/);
@@ -229,6 +300,9 @@ test("a numeric zip column is left to the ordinary generator", () => {
       primaryKey: ["id"],
     }),
   );
-  const rows = rowsFor(build(s, { rows: { addresses: 20 }, seed: 8 }), "public.addresses");
+  const rows = rowsFor(
+    build(s, { rows: { addresses: 20 }, seed: 8 }),
+    "public.addresses",
+  );
   for (const r of rows) assert.equal(typeof r.zip, "number");
 });

@@ -21,7 +21,11 @@ function usersAndOrders(): Schema {
     uniques: [["email"]],
   });
   const orders = table("orders", {
-    columns: [idCol(), col("user_id", { udtName: "int4" }), col("total", { udtName: "numeric" })],
+    columns: [
+      idCol(),
+      col("user_id", { udtName: "int4" }),
+      col("total", { udtName: "numeric" }),
+    ],
     primaryKey: ["id"],
     foreignKeys: [fk(["user_id"], "users", ["id"])],
   });
@@ -35,7 +39,10 @@ function rowsFor(data: ReturnType<typeof build>, key: string) {
 }
 
 test("child FK values reference existing parent rows", () => {
-  const data = build(usersAndOrders(), { rows: { users: 5, orders: 30 }, seed: 1 });
+  const data = build(usersAndOrders(), {
+    rows: { users: 5, orders: 30 },
+    seed: 1,
+  });
   const userIds = new Set(rowsFor(data, "public.users").map((r) => r.id));
   const orders = rowsFor(data, "public.orders");
 
@@ -53,7 +60,11 @@ test("synthetic integer identity PKs are assigned 1..N", () => {
 
 function usersWithBio(): Schema {
   const users = table("users", {
-    columns: [idCol(), col("email", { udtName: "text" }), col("bio", { udtName: "text", nullable: true })],
+    columns: [
+      idCol(),
+      col("email", { udtName: "text" }),
+      col("bio", { udtName: "text", nullable: true }),
+    ],
     primaryKey: ["id"],
     uniques: [["email"]],
   });
@@ -61,32 +72,64 @@ function usersWithBio(): Schema {
 }
 
 test("null rate 1 leaves a nullable column NULL on every row", () => {
-  const data = build(usersWithBio(), { rows: { users: 30 }, nullRates: { "users.bio": 1 }, seed: 1 });
+  const data = build(usersWithBio(), {
+    rows: { users: 30 },
+    nullRates: { "users.bio": 1 },
+    seed: 1,
+  });
   const bios = rowsFor(data, "public.users").map((r) => r.bio);
-  assert.ok(bios.every((b) => b === null), "expected every bio to be NULL");
+  assert.ok(
+    bios.every((b) => b === null),
+    "expected every bio to be NULL",
+  );
 });
 
 test("null rate 0 fills a nullable column on every row", () => {
-  const data = build(usersWithBio(), { rows: { users: 30 }, nullRates: { "users.bio": 0 }, seed: 1 });
+  const data = build(usersWithBio(), {
+    rows: { users: 30 },
+    nullRates: { "users.bio": 0 },
+    seed: 1,
+  });
   const bios = rowsFor(data, "public.users").map((r) => r.bio);
-  assert.ok(bios.every((b) => b !== null), "expected no bio to be NULL");
+  assert.ok(
+    bios.every((b) => b !== null),
+    "expected no bio to be NULL",
+  );
 });
 
 test("null rate resolves by bare column name too", () => {
-  const data = build(usersWithBio(), { rows: { users: 20 }, nullRates: { bio: 1 }, seed: 1 });
+  const data = build(usersWithBio(), {
+    rows: { users: 20 },
+    nullRates: { bio: 1 },
+    seed: 1,
+  });
   const bios = rowsFor(data, "public.users").map((r) => r.bio);
-  assert.ok(bios.every((b) => b === null), "expected bare-name null rate to apply");
+  assert.ok(
+    bios.every((b) => b === null),
+    "expected bare-name null rate to apply",
+  );
 });
 
 test("a NOT NULL column ignores a configured null rate", () => {
-  const data = build(usersWithBio(), { rows: { users: 20 }, nullRates: { "users.email": 1 }, seed: 1 });
+  const data = build(usersWithBio(), {
+    rows: { users: 20 },
+    nullRates: { "users.email": 1 },
+    seed: 1,
+  });
   const emails = rowsFor(data, "public.users").map((r) => r.email);
-  assert.ok(emails.every((e) => e !== null), "NOT NULL column must never be nulled");
+  assert.ok(
+    emails.every((e) => e !== null),
+    "NOT NULL column must never be nulled",
+  );
 });
 
 test("an unconfigured null rate leaves default output byte-identical", () => {
   const base = build(usersWithBio(), { rows: { users: 25 }, seed: 9 });
-  const withEmpty = build(usersWithBio(), { rows: { users: 25 }, nullRates: {}, seed: 9 });
+  const withEmpty = build(usersWithBio(), {
+    rows: { users: 25 },
+    nullRates: {},
+    seed: 9,
+  });
   assert.deepEqual(withEmpty, base);
 });
 
@@ -128,7 +171,11 @@ test("self-referential FK points at an existing row or null", () => {
 });
 
 test("skipped tables are omitted from the output entirely", () => {
-  const data = build(usersAndOrders(), { rows: { users: 5, orders: 5 }, skip: ["orders"], seed: 1 });
+  const data = build(usersAndOrders(), {
+    rows: { users: 5, orders: 5 },
+    skip: ["orders"],
+    seed: 1,
+  });
   assert.ok(!data.some((d) => d.table.key === "public.orders"));
   assert.ok(rowsFor(data, "public.users").length > 0);
 });
@@ -162,8 +209,12 @@ test("numeric CHECK lower bound is respected (price > 0)", () => {
     primaryKey: ["id"],
     checks: [{ expr: "(price > (0)::numeric)" }],
   });
-  const rows = rowsFor(build(schema(t), { rows: { products: 50 }, seed: 1 }), "public.products");
-  for (const r of rows) assert.ok((r.price as number) > 0, `price ${r.price} not > 0`);
+  const rows = rowsFor(
+    build(schema(t), { rows: { products: 50 }, seed: 1 }),
+    "public.products",
+  );
+  for (const r of rows)
+    assert.ok((r.price as number) > 0, `price ${r.price} not > 0`);
 });
 
 test("integer CHECK range is respected (rating BETWEEN 1 AND 5)", () => {
@@ -172,7 +223,10 @@ test("integer CHECK range is respected (rating BETWEEN 1 AND 5)", () => {
     primaryKey: ["id"],
     checks: [{ expr: "((rating >= 1) AND (rating <= 5))" }],
   });
-  const rows = rowsFor(build(schema(t), { rows: { reviews: 50 }, seed: 2 }), "public.reviews");
+  const rows = rowsFor(
+    build(schema(t), { rows: { reviews: 50 }, seed: 2 }),
+    "public.reviews",
+  );
   for (const r of rows) {
     const v = r.rating as number;
     assert.ok(v >= 1 && v <= 5, `rating ${v} outside [1,5]`);
@@ -185,9 +239,15 @@ test("membership CHECK confines values to the allowed set", () => {
     primaryKey: ["id"],
     checks: [{ expr: "(state = ANY (ARRAY['open'::text, 'closed'::text]))" }],
   });
-  const rows = rowsFor(build(schema(t), { rows: { tickets: 30 }, seed: 3 }), "public.tickets");
+  const rows = rowsFor(
+    build(schema(t), { rows: { tickets: 30 }, seed: 3 }),
+    "public.tickets",
+  );
   for (const r of rows) {
-    assert.ok(["open", "closed"].includes(r.state as string), `unexpected state ${r.state}`);
+    assert.ok(
+      ["open", "closed"].includes(r.state as string),
+      `unexpected state ${r.state}`,
+    );
   }
 });
 
@@ -197,9 +257,15 @@ test("length CHECK forces a minimum string length", () => {
     primaryKey: ["id"],
     checks: [{ expr: "(char_length(token) >= 12)" }],
   });
-  const rows = rowsFor(build(schema(t), { rows: { codes: 40 }, seed: 4 }), "public.codes");
+  const rows = rowsFor(
+    build(schema(t), { rows: { codes: 40 }, seed: 4 }),
+    "public.codes",
+  );
   for (const r of rows) {
-    assert.ok((r.token as string).length >= 12, `token too short: "${r.token}"`);
+    assert.ok(
+      (r.token as string).length >= 12,
+      `token too short: "${r.token}"`,
+    );
   }
 });
 
@@ -210,7 +276,11 @@ test("user column override still wins over a CHECK bound", () => {
     checks: [{ expr: "(price > (0)::numeric)" }],
   });
   const rows = rowsFor(
-    build(schema(t), { rows: { products: 5 }, columns: { "products.price": { value: 42 } }, seed: 1 }),
+    build(schema(t), {
+      rows: { products: 5 },
+      columns: { "products.price": { value: 42 } },
+      seed: 1,
+    }),
     "public.products",
   );
   for (const r of rows) assert.equal(r.price, 42);
@@ -219,14 +289,22 @@ test("user column override still wins over a CHECK bound", () => {
 // ---- determinism ----
 
 test("the same seed produces byte-identical SQL", () => {
-  const s1 = toSql(build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 42 }));
-  const s2 = toSql(build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 42 }));
+  const s1 = toSql(
+    build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 42 }),
+  );
+  const s2 = toSql(
+    build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 42 }),
+  );
   assert.equal(s1, s2);
 });
 
 test("different seeds produce different SQL", () => {
-  const s1 = toSql(build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 1 }));
-  const s2 = toSql(build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 2 }));
+  const s1 = toSql(
+    build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 1 }),
+  );
+  const s2 = toSql(
+    build(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 2 }),
+  );
   assert.notEqual(s1, s2);
 });
 
@@ -257,7 +335,11 @@ test("output is byte-identical across batch sizes", async () => {
 });
 
 test("generateInto reports per-table kept-row counts", async () => {
-  const { stats } = await collect(usersAndOrders(), { rows: { users: 10, orders: 40 }, seed: 42 }, 7);
+  const { stats } = await collect(
+    usersAndOrders(),
+    { rows: { users: 10, orders: 40 }, seed: 42 },
+    7,
+  );
   const byKey = new Map(stats.map((s) => [s.table.key, s.rows]));
   assert.equal(byKey.get("public.users"), 10);
   assert.equal(byKey.get("public.orders"), 40);

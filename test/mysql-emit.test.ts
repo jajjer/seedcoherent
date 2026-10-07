@@ -2,7 +2,12 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MysqlSink, mysqlLiteral, toParam, toSqlMysql } from "../src/mysql-emit.js";
+import {
+  MysqlSink,
+  mysqlLiteral,
+  toParam,
+  toSqlMysql,
+} from "../src/mysql-emit.js";
 import type { Row, TableData } from "../src/generate.js";
 import type { Connection } from "../src/types.js";
 import { col, table } from "./helpers.js";
@@ -15,11 +20,17 @@ test("mysqlLiteral formats scalars, dates, blobs, and escapes strings", () => {
   assert.equal(mysqlLiteral(true, textCol), "1");
   assert.equal(mysqlLiteral(false, textCol), "0");
   assert.equal(mysqlLiteral(42, textCol), "42");
-  assert.equal(mysqlLiteral(new Date("2025-01-02T03:04:05.678Z"), textCol), "'2025-01-02 03:04:05'");
+  assert.equal(
+    mysqlLiteral(new Date("2025-01-02T03:04:05.678Z"), textCol),
+    "'2025-01-02 03:04:05'",
+  );
   assert.equal(mysqlLiteral(Buffer.from([0xde, 0xad]), textCol), "X'dead'");
   // Backslash and single-quote are both escaped (MySQL treats \ as special).
   assert.equal(mysqlLiteral("a'b\\c", textCol), "'a''b\\\\c'");
-  assert.equal(mysqlLiteral({ a: 1 }, jsonCol), `'${JSON.stringify({ a: 1 })}'`);
+  assert.equal(
+    mysqlLiteral({ a: 1 }, jsonCol),
+    `'${JSON.stringify({ a: 1 })}'`,
+  );
 });
 
 test("toParam converts booleans and serializes JSON, passes Date/Buffer through", () => {
@@ -35,9 +46,19 @@ test("toParam converts booleans and serializes JSON, passes Date/Buffer through"
 });
 
 test("toSqlMysql wraps inserts with FK-check toggles and a transaction", () => {
-  const t = table("users", { schema: "app", columns: [col("id", { udtName: "int" }), textCol] });
+  const t = table("users", {
+    schema: "app",
+    columns: [col("id", { udtName: "int" }), textCol],
+  });
   const data: TableData[] = [
-    { table: t, columns: t.columns, rows: [{ id: 1, c: "x" }, { id: 2, c: "y" }] },
+    {
+      table: t,
+      columns: t.columns,
+      rows: [
+        { id: 1, c: "x" },
+        { id: 2, c: "y" },
+      ],
+    },
   ];
   const sql = toSqlMysql(data);
   assert.match(sql, /^SET FOREIGN_KEY_CHECKS=0;\nSTART TRANSACTION;/);
@@ -48,8 +69,12 @@ test("toSqlMysql wraps inserts with FK-check toggles and a transaction", () => {
 });
 
 test("toSqlMysql with onConflict: skip emits INSERT IGNORE", () => {
-  const t = table("users", { columns: [col("id", { udtName: "int" }), textCol] });
-  const data: TableData[] = [{ table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] }];
+  const t = table("users", {
+    columns: [col("id", { udtName: "int" }), textCol],
+  });
+  const data: TableData[] = [
+    { table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] },
+  ];
   const sql = toSqlMysql(data, { onConflict: "skip" });
   assert.match(sql, /INSERT IGNORE INTO `users` \(`id`, `c`\) VALUES/);
 });
@@ -59,7 +84,9 @@ test("toSqlMysql with onConflict: update emits ON DUPLICATE KEY UPDATE for non-P
     columns: [col("id", { udtName: "int" }), textCol],
     primaryKey: ["id"],
   });
-  const data: TableData[] = [{ table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] }];
+  const data: TableData[] = [
+    { table: t, columns: t.columns, rows: [{ id: 1, c: "x" }] },
+  ];
   const sql = toSqlMysql(data, { onConflict: "update" });
   // `id` is in the PK → excluded from SET; only `c` is updated
   assert.match(sql, /ON DUPLICATE KEY UPDATE `c` = VALUES\(`c`\)/);
@@ -70,7 +97,10 @@ test("toSqlMysql with onConflict: update emits ON DUPLICATE KEY UPDATE for non-P
 /** Records every query the sink issues so we can assert SQL + params. */
 class RecordingConn implements Connection {
   calls: { sql: string; params?: unknown[] }[] = [];
-  async query<T = any>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+  async query<T = any>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }> {
     this.calls.push({ sql, params });
     return { rows: [] as T[] };
   }
@@ -78,7 +108,10 @@ class RecordingConn implements Connection {
 }
 
 async function runSink(conn: Connection, data: TableData[], opts = {}) {
-  const sink = new MysqlSink(conn, { ...opts, tables: data.map((d) => d.table) });
+  const sink = new MysqlSink(conn, {
+    ...opts,
+    tables: data.map((d) => d.table),
+  });
   for (const { table, rows, columns } of data) {
     await sink.begin(table, columns);
     await sink.write(rows);
@@ -89,8 +122,14 @@ async function runSink(conn: Connection, data: TableData[], opts = {}) {
 }
 
 test("MysqlSink batches a multi-row INSERT inside a transaction", async () => {
-  const t = table("users", { schema: "app", columns: [col("id", { udtName: "int" }), textCol] });
-  const rows: Row[] = [{ id: 1, c: "a" }, { id: 2, c: "b" }];
+  const t = table("users", {
+    schema: "app",
+    columns: [col("id", { udtName: "int" }), textCol],
+  });
+  const rows: Row[] = [
+    { id: 1, c: "a" },
+    { id: 2, c: "b" },
+  ];
   const conn = new RecordingConn();
   const sink = await runSink(conn, [{ table: t, columns: t.columns, rows }]);
 
@@ -107,8 +146,14 @@ test("MysqlSink batches a multi-row INSERT inside a transaction", async () => {
 });
 
 test("MysqlSink truncates via reverse-order DELETE with FK checks off", async () => {
-  const users = table("users", { schema: "app", columns: [col("id", { udtName: "int" })] });
-  const orders = table("orders", { schema: "app", columns: [col("id", { udtName: "int" })] });
+  const users = table("users", {
+    schema: "app",
+    columns: [col("id", { udtName: "int" })],
+  });
+  const orders = table("orders", {
+    schema: "app",
+    columns: [col("id", { udtName: "int" })],
+  });
   const conn = new RecordingConn();
   await runSink(
     conn,
@@ -130,7 +175,10 @@ test("MysqlSink truncates via reverse-order DELETE with FK checks off", async ()
 });
 
 test("MysqlSink rolls back when an insert fails", async () => {
-  const t = table("users", { schema: "app", columns: [col("id", { udtName: "int" })] });
+  const t = table("users", {
+    schema: "app",
+    columns: [col("id", { udtName: "int" })],
+  });
   const conn = new RecordingConn();
   const original = conn.query.bind(conn);
   conn.query = async (sql: string, params?: unknown[]) => {

@@ -16,7 +16,10 @@ function memConn(ddl: string): Connection {
   const db = new Database(":memory:");
   db.exec(ddl);
   return {
-    async query<T = any>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    async query<T = any>(
+      sql: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[] }> {
       const stmt = db.prepare(sql);
       const args = (params ?? []) as unknown[];
       if (stmt.reader) return { rows: stmt.all(...args) as T[] };
@@ -40,13 +43,22 @@ test("categorizeSqlite honors semantic types before affinity", () => {
 });
 
 test("categorizeSqlite falls back to SQLite type affinity", () => {
-  for (const t of ["INTEGER", "INT", "BIGINT", "TINYINT"]) assert.equal(categorizeSqlite(t), "integer");
-  for (const t of ["TEXT", "VARCHAR(255)", "CHARACTER(10)", "CLOB", "NVARCHAR"]) {
+  for (const t of ["INTEGER", "INT", "BIGINT", "TINYINT"])
+    assert.equal(categorizeSqlite(t), "integer");
+  for (const t of [
+    "TEXT",
+    "VARCHAR(255)",
+    "CHARACTER(10)",
+    "CLOB",
+    "NVARCHAR",
+  ]) {
     assert.equal(categorizeSqlite(t), "text");
   }
   for (const t of ["", "BLOB"]) assert.equal(categorizeSqlite(t), "bytea");
-  for (const t of ["REAL", "DOUBLE", "FLOAT"]) assert.equal(categorizeSqlite(t), "decimal");
-  for (const t of ["DECIMAL(10,2)", "NUMERIC", "MONEY"]) assert.equal(categorizeSqlite(t), "decimal");
+  for (const t of ["REAL", "DOUBLE", "FLOAT"])
+    assert.equal(categorizeSqlite(t), "decimal");
+  for (const t of ["DECIMAL(10,2)", "NUMERIC", "MONEY"])
+    assert.equal(categorizeSqlite(t), "decimal");
 });
 
 test("normalizeSqliteCheck requotes identifiers and rewrites IN-lists", () => {
@@ -74,7 +86,11 @@ test("extractChecks pulls column- and table-level CHECKs with balanced parens", 
     kind  TEXT CHECK (kind IN ('a','b')),
     CHECK (length(kind) <= 8)
   )`;
-  assert.deepEqual(extractChecks(ddl), ["price > 0", "kind IN ('a','b')", "length(kind) <= 8"]);
+  assert.deepEqual(extractChecks(ddl), [
+    "price > 0",
+    "kind IN ('a','b')",
+    "length(kind) <= 8",
+  ]);
 });
 
 test("introspectSqlite reads columns, keys, uniques, FKs, and checks", async () => {
@@ -96,7 +112,10 @@ test("introspectSqlite reads columns, keys, uniques, FKs, and checks", async () 
   await conn.end();
 
   // The view is excluded; only base tables remain.
-  assert.deepEqual([...schema.tables.keys()].sort(), ["main.orders", "main.users"]);
+  assert.deepEqual([...schema.tables.keys()].sort(), [
+    "main.orders",
+    "main.users",
+  ]);
 
   const users = schema.tables.get("main.users")!;
   assert.deepEqual(users.primaryKey, ["id"]);
@@ -108,7 +127,9 @@ test("introspectSqlite reads columns, keys, uniques, FKs, and checks", async () 
   assert.equal(email.nullable, false);
   // The role CHECK becomes an IN-membership bound the generator can honor.
   const roleCheck = users.checks.map((c) => c.expr);
-  assert.ok(roleCheck.some((e) => /= ANY \(ARRAY\['admin','member'\]\)/.test(e)));
+  assert.ok(
+    roleCheck.some((e) => /= ANY \(ARRAY\['admin','member'\]\)/.test(e)),
+  );
 
   const orders = schema.tables.get("main.orders")!;
   assert.deepEqual(orders.foreignKeys, [
@@ -137,7 +158,10 @@ test("introspectSqlite handles composite PK/FK and a null FK target (rowid)", as
   const items = schema.tables.get("main.order_items")!;
   assert.deepEqual(items.primaryKey, ["order_id", "line_no"]);
   // A composite PK is not a rowid alias, so it is not DB-assigned.
-  assert.equal(items.columns.find((c) => c.name === "order_id")!.isIdentity, false);
+  assert.equal(
+    items.columns.find((c) => c.name === "order_id")!.isIdentity,
+    false,
+  );
   assert.deepEqual(items.foreignKeys, [
     { columns: ["order_id"], refTable: "main.orders", refColumns: ["id"] },
   ]);
@@ -153,6 +177,8 @@ test("introspectSqlite marks generated columns", async () => {
   `);
   const schema = await introspectSqlite(conn, ["main"]);
   await conn.end();
-  const tax = schema.tables.get("main.t")!.columns.find((c) => c.name === "tax")!;
+  const tax = schema.tables
+    .get("main.t")!
+    .columns.find((c) => c.name === "tax")!;
   assert.equal(tax.isGenerated, true);
 });

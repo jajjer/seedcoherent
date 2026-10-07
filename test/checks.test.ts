@@ -37,7 +37,9 @@ test("flipped operand order is normalized", () => {
 });
 
 test("membership becomes an allowed value set (text column)", () => {
-  const c = parse("(status = ANY (ARRAY['active'::text, 'inactive'::text]))").get("status");
+  const c = parse(
+    "(status = ANY (ARRAY['active'::text, 'inactive'::text]))",
+  ).get("status");
   assert.deepEqual(c?.in, ["active", "inactive"]);
 });
 

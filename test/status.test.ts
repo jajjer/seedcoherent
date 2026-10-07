@@ -51,7 +51,10 @@ test("markers agree with status: set at/before the current state, null after", (
     const setAndValid = (v: unknown) => {
       assert.notEqual(v, null, `${status}: marker unexpectedly null`);
       const ms = timestampMs(v)!;
-      assert.ok(ms >= created && ms <= win.untilMs, `${status}: marker ${v} outside [created, until]`);
+      assert.ok(
+        ms >= created && ms <= win.untilMs,
+        `${status}: marker ${v} outside [created, until]`,
+      );
     };
     if (status === "pending") {
       assert.equal(r.shipped_at, null);
@@ -76,7 +79,12 @@ test("markers agree with status: set at/before the current state, null after", (
     }
   }
   // The seed must actually exercise every branch for the assertions to mean something.
-  assert.deepEqual([...seen].sort(), ["cancelled", "delivered", "pending", "shipped"]);
+  assert.deepEqual([...seen].sort(), [
+    "cancelled",
+    "delivered",
+    "pending",
+    "shipped",
+  ]);
 });
 
 test("a NOT NULL marker that should be absent is left as-is (can't be nulled)", () => {
@@ -91,7 +99,10 @@ test("a NOT NULL marker that should be absent is left as-is (can't be nulled)", 
   });
   // No throw, and every row still carries a shipped_at (NOT NULL can't be cleared),
   // including pending rows where status coherence would otherwise clear it.
-  for (const r of rowsFor(build(schema(orders), { rows: { orders: 100 }, seed: 4 }), "public.orders")) {
+  for (const r of rowsFor(
+    build(schema(orders), { rows: { orders: 100 }, seed: 4 }),
+    "public.orders",
+  )) {
     assert.notEqual(r.shipped_at, null);
   }
 });
@@ -141,7 +152,10 @@ test("a CHECK (status IN (...)) domain drives the same coherence", () => {
   });
   const win = temporalWindow({ seed: 8 });
   const seen = new Set<string>();
-  for (const r of rowsFor(build(schema(tickets), { rows: { tickets: 300 }, seed: 8 }), "public.tickets")) {
+  for (const r of rowsFor(
+    build(schema(tickets), { rows: { tickets: 300 }, seed: 8 }),
+    "public.tickets",
+  )) {
     seen.add(r.status as string);
     if (r.status === "open") {
       assert.equal(r.closed_at, null);
@@ -157,13 +171,20 @@ test("planStatus needs a bounded status column with a matching marker", () => {
   const noChecks = new Map();
   // No status column at all.
   assert.equal(
-    planStatus(table("t", { columns: [col("name"), col("created_at", { udtName: "timestamptz" })] }), noChecks),
+    planStatus(
+      table("t", {
+        columns: [col("name"), col("created_at", { udtName: "timestamptz" })],
+      }),
+      noChecks,
+    ),
     null,
   );
   // A status column but a free-text (unbounded) domain — nothing to key markers off.
   assert.equal(
     planStatus(
-      table("t", { columns: [col("status"), col("shipped_at", { udtName: "timestamptz" })] }),
+      table("t", {
+        columns: [col("status"), col("shipped_at", { udtName: "timestamptz" })],
+      }),
       noChecks,
     ),
     null,
@@ -172,7 +193,10 @@ test("planStatus needs a bounded status column with a matching marker", () => {
   assert.equal(
     planStatus(
       table("t", {
-        columns: [col("status", { udtName: "s", enumValues: ["a", "b"] }), col("note")],
+        columns: [
+          col("status", { udtName: "s", enumValues: ["a", "b"] }),
+          col("note"),
+        ],
       }),
       noChecks,
     ),
@@ -188,5 +212,8 @@ test("planStatus needs a bounded status column with a matching marker", () => {
   const plan = planStatus(t, parseChecks(t.checks));
   assert.ok(plan);
   assert.deepEqual(plan.progress, ["pending", "shipped"]);
-  assert.deepEqual(plan.markers.get("shipped")?.map((m) => m.column), ["shipped_at"]);
+  assert.deepEqual(
+    plan.markers.get("shipped")?.map((m) => m.column),
+    ["shipped_at"],
+  );
 });
