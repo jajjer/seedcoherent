@@ -38,7 +38,9 @@ export function topoSort(schema: Schema): SortResult {
 
   while (remaining.size > 0) {
     const ready = [...remaining].filter((key) =>
-      [...deps.get(key)!].every((dep) => placed.has(dep) || !remaining.has(dep)),
+      [...deps.get(key)!].every(
+        (dep) => placed.has(dep) || !remaining.has(dep),
+      ),
     );
 
     if (ready.length === 0) {

@@ -47,7 +47,11 @@ test("camelCase names are tokenized (shippingCity -> city)", () => {
 test("enum column always draws from its labels, ignoring the name", () => {
   const labels = ["draft", "sent", "paid"];
   // Named "email" to prove enum handling wins over name heuristics.
-  const c = col("email", { udtName: "order_status", dataType: "enum", enumValues: labels });
+  const c = col("email", {
+    udtName: "order_status",
+    dataType: "enum",
+    enumValues: labels,
+  });
   for (let i = 0; i < 20; i++) {
     assert.ok(labels.includes(gen(c) as string));
   }
@@ -87,7 +91,10 @@ test("macaddr column yields six colon-separated octets", () => {
 
 test("xml column yields a well-formed record element", () => {
   const v = gen(col("payload", { udtName: "xml" })) as string;
-  assert.match(v, /^<record><id>[0-9a-f-]{36}<\/id><value>[a-z]+<\/value><\/record>$/i);
+  assert.match(
+    v,
+    /^<record><id>[0-9a-f-]{36}<\/id><value>[a-z]+<\/value><\/record>$/i,
+  );
 });
 
 test("decimal respects numeric scale", () => {
@@ -102,7 +109,10 @@ test("varchar(n) length limit truncates generic text output", () => {
   const c = col("code", { udtName: "varchar", maxLength: 4 });
   // "code" matches no name rule, so it falls back to the length-aware text gen.
   for (let i = 0; i < 20; i++) {
-    const v = inferGenerator(table("t", { columns: [c] }), c)(faker()) as string;
+    const v = inferGenerator(
+      table("t", { columns: [c] }),
+      c,
+    )(faker()) as string;
     assert.ok(v.length <= 4, `"${v}" exceeds max length 4`);
   }
 });
@@ -122,7 +132,8 @@ test("enum array draws every element from the enum labels", () => {
   for (let i = 0; i < 20; i++) {
     const v = gen(c) as string[];
     assert.ok(Array.isArray(v));
-    for (const el of v) assert.ok(labels.includes(el), `unexpected enum element ${el}`);
+    for (const el of v)
+      assert.ok(labels.includes(el), `unexpected enum element ${el}`);
   }
 });
 
@@ -158,7 +169,12 @@ test("a regex CHECK generates a matching string (zip domain)", () => {
   const c = col("zip", { udtName: "text" });
   for (let i = 0; i < 20; i++) {
     const t = table("t", { columns: [c] });
-    const v = inferGenerator(t, c, {}, { pattern: "^[0-9]{5}$" })(faker()) as string;
+    const v = inferGenerator(
+      t,
+      c,
+      {},
+      { pattern: "^[0-9]{5}$" },
+    )(faker()) as string;
     assert.match(v, /^[0-9]{5}$/, `"${v}" does not match the pattern`);
   }
 });
@@ -183,7 +199,10 @@ test("RANGE partition key stays inside a covered interval", () => {
   for (let i = 0; i < 20; i++) {
     const d = g(faker()) as Date;
     assert.ok(d instanceof Date);
-    assert.ok(d >= new Date("2024-01-01") && d < new Date("2025-01-01"), `${d.toISOString()} out of range`);
+    assert.ok(
+      d >= new Date("2024-01-01") && d < new Date("2025-01-01"),
+      `${d.toISOString()} out of range`,
+    );
   }
 });
 
@@ -203,7 +222,12 @@ test("LIST partition key draws only from accepted values", () => {
 
 test("partition key generator is skipped when a DEFAULT partition exists", () => {
   const c = col("at", { udtName: "timestamptz", dataType: "timestamp" });
-  const part: PartitionInfo = { strategy: "range", keyColumns: ["at"], hasDefault: true, ranges: [] };
+  const part: PartitionInfo = {
+    strategy: "range",
+    keyColumns: ["at"],
+    hasDefault: true,
+    ranges: [],
+  };
   assert.equal(partitionKeyGenerator(c, part), null);
 });
 
@@ -238,7 +262,9 @@ test("qualified table.column override beats a bare column override", () => {
 
 test("invalid faker path throws when invoked", () => {
   const c = col("x");
-  const g = inferGenerator(table("t", { columns: [c] }), c, { x: "not.a.real.path" });
+  const g = inferGenerator(table("t", { columns: [c] }), c, {
+    x: "not.a.real.path",
+  });
   assert.throws(() => g(faker()), /Invalid faker path/);
 });
 
@@ -254,7 +280,10 @@ function samples(c: ReturnType<typeof col>, n = 200): number[] {
 
 test("age integer column stays in a human range", () => {
   const vals = samples(col("age", { udtName: "int4" }));
-  assert.ok(vals.every((v) => Number.isInteger(v) && v >= 0 && v <= 95), `out of range: ${Math.max(...vals)}`);
+  assert.ok(
+    vals.every((v) => Number.isInteger(v) && v >= 0 && v <= 95),
+    `out of range: ${Math.max(...vals)}`,
+  );
 });
 
 test("year column produces plausible years", () => {

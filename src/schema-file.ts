@@ -85,15 +85,25 @@ const TYPE_ALIASES: Record<string, string> = {
 };
 
 /** `serial`/`bigserial`/`smallserial` imply a `nextval(...)` default. */
-const SERIAL_TYPES = new Set(["serial", "serial4", "bigserial", "serial8", "smallserial", "serial2"]);
+const SERIAL_TYPES = new Set([
+  "serial",
+  "serial4",
+  "bigserial",
+  "serial8",
+  "smallserial",
+  "serial2",
+]);
 
 /** The parser represents names as `{ name, schema? }`; normalize to a string. */
 function nameOf(n: any): string {
-  return typeof n === "string" ? n : n?.name ?? "";
+  return typeof n === "string" ? n : (n?.name ?? "");
 }
 
 /** Resolve a DDL type-name node to the udt name + broad category we generate against. */
-function resolveScalar(typeName: string, enums: Map<string, string[]>): TypeRef {
+function resolveScalar(
+  typeName: string,
+  enums: Map<string, string[]>,
+): TypeRef {
   const lower = typeName.toLowerCase();
   const enumValues = enums.get(lower) ?? null;
   if (enumValues) return { udtName: typeName, dataType: "enum", enumValues };
@@ -126,12 +136,20 @@ function resolveColumnType(
 }
 
 /** `numeric(p, s)` / `varchar(n)` — pull length and precision/scale out of `config`. */
-function typeConfig(dt: any): { maxLength: number | null; precision: number | null; scale: number | null } {
+function typeConfig(dt: any): {
+  maxLength: number | null;
+  precision: number | null;
+  scale: number | null;
+} {
   const cfg: number[] = Array.isArray(dt?.config) ? dt.config : [];
   const base = nameOf(dt).toLowerCase();
   const isNumeric = base === "numeric" || base === "decimal";
   if (isNumeric) {
-    return { maxLength: null, precision: cfg[0] ?? null, scale: cfg[1] ?? null };
+    return {
+      maxLength: null,
+      precision: cfg[0] ?? null,
+      scale: cfg[1] ?? null,
+    };
   }
   // varchar(n)/char(n): the single config value is a character length.
   return { maxLength: cfg[0] ?? null, precision: null, scale: null };
@@ -208,7 +226,10 @@ function renderOperand(node: any): string | null {
       return `'${String(node.value).replace(/'/g, "''")}'`;
     case "call": {
       const fn = nameOf(node.function).toLowerCase();
-      if (["char_length", "length", "octet_length"].includes(fn) && node.args?.length === 1) {
+      if (
+        ["char_length", "length", "octet_length"].includes(fn) &&
+        node.args?.length === 1
+      ) {
         const arg = renderOperand(node.args[0]);
         return arg === null ? null : `${fn}(${arg})`;
       }
@@ -222,8 +243,10 @@ function renderOperand(node: any): string | null {
 /** Render a literal node as SQL text (quoted string or bare number), else null. */
 function renderLiteral(node: any): string | null {
   if (!node || typeof node !== "object") return null;
-  if (node.type === "string") return `'${String(node.value).replace(/'/g, "''")}'`;
-  if (node.type === "integer" || node.type === "numeric") return String(node.value);
+  if (node.type === "string")
+    return `'${String(node.value).replace(/'/g, "''")}'`;
+  if (node.type === "integer" || node.type === "numeric")
+    return String(node.value);
   return null;
 }
 
@@ -242,7 +265,8 @@ function splitStatements(sql: string): string[] {
     const ch = sql[i];
     if (ch === "'") {
       i++;
-      while (i < n && !(sql[i] === "'" && sql[i + 1] !== "'")) i += sql[i] === "'" ? 2 : 1;
+      while (i < n && !(sql[i] === "'" && sql[i + 1] !== "'"))
+        i += sql[i] === "'" ? 2 : 1;
       i++;
       continue;
     }
@@ -290,7 +314,11 @@ function parseStatements(sql: string): any[] {
 }
 
 /** Add a table-level (or promoted column-level) constraint to its TableInfo. */
-function applyConstraint(table: TableInfo, con: any, enums: Map<string, string[]>): void {
+function applyConstraint(
+  table: TableInfo,
+  con: any,
+  _enums: Map<string, string[]>,
+): void {
   switch (con?.type) {
     case "primary key":
       table.primaryKey = (con.columns as any[]).map(nameOf);
@@ -339,7 +367,10 @@ function buildTable(stmt: any, enums: Map<string, string[]>): TableInfo {
   for (const entry of stmt.columns ?? []) {
     if (entry.kind !== "column") continue;
     const colName = nameOf(entry.name);
-    const { ref, elementType, isSerial } = resolveColumnType(entry.dataType, enums);
+    const { ref, elementType, isSerial } = resolveColumnType(
+      entry.dataType,
+      enums,
+    );
     const { maxLength, precision, scale } = typeConfig(entry.dataType);
 
     const col: ColumnInfo = {
@@ -409,8 +440,12 @@ function buildTable(stmt: any, enums: Map<string, string[]>): TableInfo {
  * hand-rolled parser in `sql-ddl.ts`. The three produce the same internal model,
  * so everything downstream (topo-sort, generation, emit) is dialect-agnostic.
  */
-export function loadSchemaFromDdl(sql: string, dialect: SchemaFileDialect = "postgres"): Schema {
-  if (dialect === "mysql" || dialect === "sqlite") return loadSchemaFromSqlDdl(sql, dialect);
+export function loadSchemaFromDdl(
+  sql: string,
+  dialect: SchemaFileDialect = "postgres",
+): Schema {
+  if (dialect === "mysql" || dialect === "sqlite")
+    return loadSchemaFromSqlDdl(sql, dialect);
   return loadPostgresDdl(sql);
 }
 
@@ -426,7 +461,10 @@ function loadPostgresDdl(sql: string): Schema {
   const enums = new Map<string, string[]>();
   for (const stmt of statements) {
     if (stmt.type === "create enum") {
-      enums.set(nameOf(stmt.name).toLowerCase(), (stmt.values as any[]).map((v) => v.value));
+      enums.set(
+        nameOf(stmt.name).toLowerCase(),
+        (stmt.values as any[]).map((v) => v.value),
+      );
     }
   }
 
@@ -443,7 +481,8 @@ function loadPostgresDdl(sql: string): Schema {
     const table = tables.get(`${schema}.${nameOf(stmt.table)}`);
     if (!table) continue;
     for (const change of stmt.changes ?? []) {
-      if (change.type === "add constraint") applyConstraint(table, change.constraint, enums);
+      if (change.type === "add constraint")
+        applyConstraint(table, change.constraint, enums);
     }
   }
 

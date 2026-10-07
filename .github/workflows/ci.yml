@@ -46,6 +46,13 @@ jobs:
 
       - run: npm ci
 
+      # Cheap, DB-free checks first so the job fails fast on style/lint issues.
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npm run typecheck
 

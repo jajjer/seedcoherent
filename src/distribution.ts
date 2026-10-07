@@ -37,7 +37,10 @@ const DEFAULT_SKEW = 1;
  * output is unchanged for anyone not opting into skew.
  */
 const uniform: Distribution = {
-  bind: <T>(items: T[]): Sampler<T> => (f) => f.helpers.arrayElement(items),
+  bind:
+    <T>(items: T[]): Sampler<T> =>
+    (f) =>
+      f.helpers.arrayElement(items),
 };
 
 /**
@@ -82,7 +85,8 @@ function zipfWeights(n: number, skew: number): number[] {
  */
 function zipfDistribution(skew: number): Distribution {
   return {
-    bind: <T>(items: T[]): Sampler<T> => cumulativeSampler(items, zipfWeights(items.length, skew)),
+    bind: <T>(items: T[]): Sampler<T> =>
+      cumulativeSampler(items, zipfWeights(items.length, skew)),
   };
 }
 
@@ -105,14 +109,27 @@ export function distributionFor(spec: DistSpec): Distribution {
  * and draws from its own value/weight pairs. Values are returned as-is, so a
  * numeric or string label flows through the ordinary generator path.
  */
-export function valueSampler(values: unknown[], spec: DistSpec): Sampler<unknown> | null {
-  if (spec === "uniform" || (typeof spec === "object" && spec.kind === "uniform")) return null;
+export function valueSampler(
+  values: unknown[],
+  spec: DistSpec,
+): Sampler<unknown> | null {
+  if (
+    spec === "uniform" ||
+    (typeof spec === "object" && spec.kind === "uniform")
+  )
+    return null;
   if (typeof spec === "object" && spec.kind === "weighted") {
     const items = spec.weights.map((w) => w.value);
-    return cumulativeSampler(items, spec.weights.map((w) => w.weight));
+    return cumulativeSampler(
+      items,
+      spec.weights.map((w) => w.weight),
+    );
   }
   if (values.length === 0) return null;
-  const skew = spec === "zipf" ? DEFAULT_SKEW : (spec as { skew?: number }).skew ?? DEFAULT_SKEW;
+  const skew =
+    spec === "zipf"
+      ? DEFAULT_SKEW
+      : ((spec as { skew?: number }).skew ?? DEFAULT_SKEW);
   return cumulativeSampler(values, zipfWeights(values.length, skew));
 }
 

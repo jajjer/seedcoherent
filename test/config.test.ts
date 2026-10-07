@@ -49,22 +49,30 @@ test("parseColumnSpecs treats a bare right-hand side as a faker path", () => {
 });
 
 test("parseColumnSpecs parses value: into a constant, coercing JSON literals", () => {
-  assert.deepEqual(parseColumnSpecs(["tier=value:gold", "age=value:30", "active=value:true"]), {
-    tier: { value: "gold" },
-    age: { value: 30 },
-    active: { value: true },
-  });
+  assert.deepEqual(
+    parseColumnSpecs(["tier=value:gold", "age=value:30", "active=value:true"]),
+    {
+      tier: { value: "gold" },
+      age: { value: 30 },
+      active: { value: true },
+    },
+  );
 });
 
 test("parseColumnSpecs parses values: into a coerced pick list", () => {
-  assert.deepEqual(parseColumnSpecs(["status=values:active,inactive", "n=values:1,2,3"]), {
-    status: { values: ["active", "inactive"] },
-    n: { values: [1, 2, 3] },
-  });
+  assert.deepEqual(
+    parseColumnSpecs(["status=values:active,inactive", "n=values:1,2,3"]),
+    {
+      status: { values: ["active", "inactive"] },
+      n: { values: [1, 2, 3] },
+    },
+  );
 });
 
 test("parseColumnSpecs keeps a value: literal that itself contains '='", () => {
-  assert.deepEqual(parseColumnSpecs(["cfg=value:a=b"]), { cfg: { value: "a=b" } });
+  assert.deepEqual(parseColumnSpecs(["cfg=value:a=b"]), {
+    cfg: { value: "a=b" },
+  });
 });
 
 test("parseColumnSpecs keys off the first '=', so schema-qualified names work", () => {
@@ -74,10 +82,16 @@ test("parseColumnSpecs keys off the first '=', so schema-qualified names work", 
 });
 
 test("parseColumnSpecs rejects specs without '=', empty sides, and empty value lists", () => {
-  assert.throws(() => parseColumnSpecs(["users.email"]), /expected column=generator/);
+  assert.throws(
+    () => parseColumnSpecs(["users.email"]),
+    /expected column=generator/,
+  );
   assert.throws(() => parseColumnSpecs(["=internet.email"]), /empty column/);
   assert.throws(() => parseColumnSpecs(["users.email="]), /empty generator/);
-  assert.throws(() => parseColumnSpecs(["status=values:"]), /Empty values list/);
+  assert.throws(
+    () => parseColumnSpecs(["status=values:"]),
+    /Empty values list/,
+  );
 });
 
 test("parseColumnSpecs handles an empty list", () => {
@@ -85,11 +99,18 @@ test("parseColumnSpecs handles an empty list", () => {
 });
 
 test("parseNullRateSpecs parses column=rate pairs, including 0 and 1", () => {
-  assert.deepEqual(parseNullRateSpecs(["users.middle_name=0.7", "orders.deleted_at=1", "notes=0"]), {
-    "users.middle_name": 0.7,
-    "orders.deleted_at": 1,
-    notes: 0,
-  });
+  assert.deepEqual(
+    parseNullRateSpecs([
+      "users.middle_name=0.7",
+      "orders.deleted_at=1",
+      "notes=0",
+    ]),
+    {
+      "users.middle_name": 0.7,
+      "orders.deleted_at": 1,
+      notes: 0,
+    },
+  );
 });
 
 test("parseNullRateSpecs splits on the last '=' so schema-qualified names work", () => {
@@ -99,7 +120,10 @@ test("parseNullRateSpecs splits on the last '=' so schema-qualified names work",
 });
 
 test("parseNullRateSpecs rejects bad specs and out-of-range rates", () => {
-  assert.throws(() => parseNullRateSpecs(["users.middle_name"]), /expected column=rate/);
+  assert.throws(
+    () => parseNullRateSpecs(["users.middle_name"]),
+    /expected column=rate/,
+  );
   assert.throws(() => parseNullRateSpecs(["=0.5"]), /empty column/);
   assert.throws(() => parseNullRateSpecs(["x=abc"]), /number in \[0, 1\]/);
   assert.throws(() => parseNullRateSpecs(["x=-0.1"]), /number in \[0, 1\]/);
@@ -112,9 +136,17 @@ test("parseNullRateSpecs handles an empty list", () => {
 
 test("validateNullRates accepts valid maps and undefined, rejects bad values", () => {
   assert.doesNotThrow(() => validateNullRates(undefined));
-  assert.doesNotThrow(() => validateNullRates({ "users.x": 0, "users.y": 1, "users.z": 0.3 }));
-  assert.throws(() => validateNullRates({ "users.x": 2 }), /Invalid null rate for "users.x"/);
-  assert.throws(() => validateNullRates({ "users.x": -1 }), /Invalid null rate/);
+  assert.doesNotThrow(() =>
+    validateNullRates({ "users.x": 0, "users.y": 1, "users.z": 0.3 }),
+  );
+  assert.throws(
+    () => validateNullRates({ "users.x": 2 }),
+    /Invalid null rate for "users.x"/,
+  );
+  assert.throws(
+    () => validateNullRates({ "users.x": -1 }),
+    /Invalid null rate/,
+  );
   assert.throws(
     () => validateNullRates({ "users.x": "0.5" as unknown as number }),
     /Invalid null rate/,

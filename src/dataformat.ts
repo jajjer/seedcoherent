@@ -25,7 +25,11 @@ export function isOutputFormat(v: string): v is OutputFormat {
  * string. `this[key]` is the pre-`toJSON` value, so we can spot a Buffer before
  * its `toJSON` fires; a Date's own `toJSON` already gives the ISO string we want.
  */
-function jsonReplacer(this: Record<string, unknown>, key: string, value: unknown): unknown {
+function jsonReplacer(
+  this: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): unknown {
   const raw = this[key];
   if (Buffer.isBuffer(raw)) return raw.toString("base64");
   return value;
@@ -74,13 +78,16 @@ function csvQuote(s: string): string {
 export function tableToCsv(td: TableData): string {
   const lines = [td.columns.map((c) => csvQuote(c.name)).join(",")];
   for (const row of td.rows) {
-    lines.push(td.columns.map((c) => csvQuote(csvField(row[c.name]))).join(","));
+    lines.push(
+      td.columns.map((c) => csvQuote(csvField(row[c.name]))).join(","),
+    );
   }
   return lines.join("\n") + "\n";
 }
 
 /** Strip path separators/NUL so a table name is safe as a single filename. */
 function sanitizeFileName(name: string): string {
+  // eslint-disable-next-line no-control-regex -- NUL is stripped deliberately.
   return name.replace(/[/\\\x00]/g, "_");
 }
 
@@ -90,10 +97,12 @@ function sanitizeFileName(name: string): string {
  */
 function fileBaseNames(data: TableData[]): Map<TableInfo, string> {
   const counts = new Map<string, number>();
-  for (const d of data) counts.set(d.table.name, (counts.get(d.table.name) ?? 0) + 1);
+  for (const d of data)
+    counts.set(d.table.name, (counts.get(d.table.name) ?? 0) + 1);
   const out = new Map<TableInfo, string>();
   for (const d of data) {
-    const base = (counts.get(d.table.name) ?? 0) > 1 ? d.table.key : d.table.name;
+    const base =
+      (counts.get(d.table.name) ?? 0) > 1 ? d.table.key : d.table.name;
     out.set(d.table, sanitizeFileName(base));
   }
   return out;
@@ -116,7 +125,11 @@ export async function writeTableFiles(
   for (const td of data) {
     if (td.rows.length === 0) continue;
     const text = format === "csv" ? tableToCsv(td) : tableToNdjson(td);
-    await writeFile(join(dir, `${names.get(td.table)!}.${format}`), text, "utf8");
+    await writeFile(
+      join(dir, `${names.get(td.table)!}.${format}`),
+      text,
+      "utf8",
+    );
     rows += td.rows.length;
     files++;
   }

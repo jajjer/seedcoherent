@@ -1,7 +1,13 @@
 /** Reads a live SQLite schema into our internal representation via PRAGMAs + sqlite_master. */
 
 import { rewriteInLists } from "./checks.js";
-import type { ColumnInfo, Connection, ForeignKey, Schema, TableInfo } from "./types.js";
+import type {
+  ColumnInfo,
+  Connection,
+  ForeignKey,
+  Schema,
+  TableInfo,
+} from "./types.js";
 
 /**
  * Map a SQLite declared column type onto the broad category we generate
@@ -25,9 +31,11 @@ export function categorizeSqlite(declaredType: string): string {
 
   // SQLite type-affinity rules (https://sqlite.org/datatype3.html#affinity).
   if (t.includes("INT")) return "integer";
-  if (t.includes("CHAR") || t.includes("CLOB") || t.includes("TEXT")) return "text";
+  if (t.includes("CHAR") || t.includes("CLOB") || t.includes("TEXT"))
+    return "text";
   if (t === "" || t.includes("BLOB")) return "bytea";
-  if (t.includes("REAL") || t.includes("FLOA") || t.includes("DOUB")) return "decimal";
+  if (t.includes("REAL") || t.includes("FLOA") || t.includes("DOUB"))
+    return "decimal";
   return "decimal"; // NUMERIC affinity — DECIMAL/NUMERIC/etc.
 }
 
@@ -53,7 +61,10 @@ function parsePrecision(declaredType: string): [number | null, number | null] {
  */
 export function normalizeSqliteCheck(expr: string): string {
   const requoted = expr
-    .replace(/`((?:[^`]|``)*)`/g, (_, id: string) => `"${id.replace(/``/g, "`")}"`)
+    .replace(
+      /`((?:[^`]|``)*)`/g,
+      (_, id: string) => `"${id.replace(/``/g, "`")}"`,
+    )
     .replace(/\[([^\]]*)\]/g, (_, id: string) => `"${id}"`);
   return rewriteInLists(requoted);
 }
@@ -132,7 +143,10 @@ function isRowidAlias(cols: ColumnInfo[], primaryKey: string[]): boolean {
   return !!pk && pk.udtName.trim().toUpperCase() === "INTEGER";
 }
 
-export async function introspectSqlite(client: Connection, schemas: string[]): Promise<Schema> {
+export async function introspectSqlite(
+  client: Connection,
+  schemas: string[],
+): Promise<Schema> {
   const tables = new Map<string, TableInfo>();
 
   for (const schema of schemas) {
@@ -152,11 +166,17 @@ export async function introspectSqlite(client: Connection, schemas: string[]): P
         primaryKey: [],
         uniques: [],
         foreignKeys: [],
-        checks: sql ? extractChecks(sql).map((expr) => ({ expr: normalizeSqliteCheck(expr) })) : [],
+        checks: sql
+          ? extractChecks(sql).map((expr) => ({
+              expr: normalizeSqliteCheck(expr),
+            }))
+          : [],
       };
 
       // Columns (table_xinfo also surfaces generated + hidden columns).
-      const colRes = await client.query<ColumnRow>(`PRAGMA ${sref}.table_xinfo(${ident(name)})`);
+      const colRes = await client.query<ColumnRow>(
+        `PRAGMA ${sref}.table_xinfo(${ident(name)})`,
+      );
       // pk > 0 gives the column's 1-based position within the primary key.
       const pkCols = colRes.rows
         .filter((c) => c.pk > 0)
@@ -193,7 +213,9 @@ export async function introspectSqlite(client: Connection, schemas: string[]): P
       }
 
       // Foreign keys — rows sharing an `id` form one (composite) key, ordered by seq.
-      const fkRes = await client.query<FkRow>(`PRAGMA ${sref}.foreign_key_list(${ident(name)})`);
+      const fkRes = await client.query<FkRow>(
+        `PRAGMA ${sref}.foreign_key_list(${ident(name)})`,
+      );
       const byId = new Map<number, FkRow[]>();
       for (const r of fkRes.rows) {
         let list = byId.get(r.id);
@@ -217,11 +239,17 @@ export async function introspectSqlite(client: Connection, schemas: string[]): P
       // Unique constraints — index_list origin 'u' (UNIQUE) or 'pk' (a WITHOUT
       // ROWID / composite PK backed by an index). We keep 'u'; the PK is tracked
       // separately above.
-      const idxRes = await client.query<IndexRow>(`PRAGMA ${sref}.index_list(${ident(name)})`);
+      const idxRes = await client.query<IndexRow>(
+        `PRAGMA ${sref}.index_list(${ident(name)})`,
+      );
       for (const idx of idxRes.rows) {
         if (idx.unique !== 1 || idx.origin !== "u") continue;
-        const cols = await client.query<IndexColRow>(`PRAGMA ${sref}.index_info(${ident(idx.name)})`);
-        const names = cols.rows.sort((a, b) => a.seqno - b.seqno).map((r) => r.name);
+        const cols = await client.query<IndexColRow>(
+          `PRAGMA ${sref}.index_info(${ident(idx.name)})`,
+        );
+        const names = cols.rows
+          .sort((a, b) => a.seqno - b.seqno)
+          .map((r) => r.name);
         // Skip expression indexes (a null column name means an indexed expression).
         if (names.some((n) => n === null)) continue;
         table.uniques.push(names as string[]);

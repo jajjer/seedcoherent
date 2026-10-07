@@ -19,14 +19,31 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { buildData, requiredUnsupportedColumns, rowCount, type Row, type TableData } from "./generate.js";
-import { dialectByName, dialectFor, type Dialect, type DialectName } from "./dialect.js";
+import {
+  buildData,
+  requiredUnsupportedColumns,
+  rowCount,
+  type Row,
+  type TableData,
+} from "./generate.js";
+import {
+  dialectByName,
+  dialectFor,
+  type Dialect,
+  type DialectName,
+} from "./dialect.js";
 import { loadSchemaFromDdl } from "./schema-file.js";
 import { validateNullRates } from "./config.js";
 import { topoSort } from "./graph.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
-import type { ColumnOverride, Config, DistSpec, OnConflict, Schema } from "./types.js";
+import type {
+  ColumnOverride,
+  Config,
+  DistSpec,
+  OnConflict,
+  Schema,
+} from "./types.js";
 
 export type { Row } from "./generate.js";
 export type { ColumnOverride, DistSpec, OnConflict } from "./types.js";
@@ -123,12 +140,18 @@ export interface SeedResult {
  * ergonomic `data` map, an ordered `tables` array, and a `.toSQL()` renderer.
  */
 export async function seed(options: SeedOptions): Promise<SeedResult> {
-  const sources = [options.ddl, options.schemaFile, options.connection].filter((s) => s != null);
+  const sources = [options.ddl, options.schemaFile, options.connection].filter(
+    (s) => s != null,
+  );
   if (sources.length === 0) {
-    throw new Error("seed() needs a schema source: pass one of `ddl`, `schemaFile`, or `connection`.");
+    throw new Error(
+      "seed() needs a schema source: pass one of `ddl`, `schemaFile`, or `connection`.",
+    );
   }
   if (sources.length > 1) {
-    throw new Error("seed() takes exactly one schema source; `ddl`, `schemaFile`, and `connection` are mutually exclusive.");
+    throw new Error(
+      "seed() takes exactly one schema source; `ddl`, `schemaFile`, and `connection` are mutually exclusive.",
+    );
   }
 
   const config: Config = {
@@ -162,11 +185,16 @@ export async function seed(options: SeedOptions): Promise<SeedResult> {
   // dataset (and an unrunnable INSERT via .toSQL()); surface it now, as the CLI does.
   const skipSet = new Set(config.skip ?? []);
   const genKeys = order
-    .filter((t) => !skipSet.has(t.name) && !skipSet.has(t.key) && rowCount(t, config) > 0)
+    .filter(
+      (t) =>
+        !skipSet.has(t.name) && !skipSet.has(t.key) && rowCount(t, config) > 0,
+    )
     .map((t) => t.key);
   const unsupported = requiredUnsupportedColumns(schema, config, genKeys);
   if (unsupported.length > 0) {
-    const lines = unsupported.map((c) => `  ${c.table}.${c.column} (${c.udtName})`);
+    const lines = unsupported.map(
+      (c) => `  ${c.table}.${c.column} (${c.udtName})`,
+    );
     const first = unsupported[0];
     throw new Error(
       [
@@ -184,10 +212,13 @@ export async function seed(options: SeedOptions): Promise<SeedResult> {
 }
 
 /** Obtain a {@link Schema} plus the dialect whose SQL flavor matches the source. */
-async function resolveSchema(options: SeedOptions): Promise<{ schema: Schema; dialect: Dialect }> {
+async function resolveSchema(
+  options: SeedOptions,
+): Promise<{ schema: Schema; dialect: Dialect }> {
   if (options.connection != null) {
     const dialect = dialectFor(options.connection);
-    const schemas = options.schemas ?? dialect.defaultSchemas(options.connection);
+    const schemas =
+      options.schemas ?? dialect.defaultSchemas(options.connection);
     const conn = await dialect.connect(options.connection);
     try {
       return { schema: await dialect.introspect(conn, schemas), dialect };
@@ -203,10 +234,16 @@ async function resolveSchema(options: SeedOptions): Promise<{ schema: Schema; di
     try {
       ddl = await readFile(options.schemaFile!, "utf8");
     } catch (err) {
-      throw new Error(`Can't read schemaFile ${options.schemaFile}: ${err instanceof Error ? err.message : err}`);
+      throw new Error(
+        `Can't read schemaFile ${options.schemaFile}: ${err instanceof Error ? err.message : err}`,
+        { cause: err },
+      );
     }
   }
-  return { schema: loadSchemaFromDdl(ddl, schemaDialect), dialect: dialectByName(outputDialect) };
+  return {
+    schema: loadSchemaFromDdl(ddl, schemaDialect),
+    dialect: dialectByName(outputDialect),
+  };
 }
 
 /** Assemble the public {@link SeedResult} from internal {@link TableData}. */
@@ -223,7 +260,8 @@ function buildResult(materialized: TableData[], dialect: Dialect): SeedResult {
   // that appears in more than one schema, so no table's rows silently overwrite
   // another's.
   const bareCounts = new Map<string, number>();
-  for (const t of tables) bareCounts.set(t.name, (bareCounts.get(t.name) ?? 0) + 1);
+  for (const t of tables)
+    bareCounts.set(t.name, (bareCounts.get(t.name) ?? 0) + 1);
   const data: Record<string, Row[]> = {};
   for (const t of tables) {
     const key = (bareCounts.get(t.name) ?? 0) > 1 ? t.key : t.name;

@@ -50,9 +50,20 @@ const toks = (s: string) =>
 function roleOf(col: ColumnInfo): Role | null {
   if (col.dataType !== "timestamp" && col.dataType !== "date") return null;
   const n = norm(col.name);
-  if (["deletedat", "expiresat", "expiredat"].some((f) => n.includes(f))) return "future";
-  if (["updatedat", "modifiedat", "lastseen", "lastlogin"].some((f) => n.includes(f))) return "activity";
-  if (["firstseen", "createdat", "insertedat", "registeredat"].some((f) => n.includes(f))) return "created";
+  if (["deletedat", "expiresat", "expiredat"].some((f) => n.includes(f)))
+    return "future";
+  if (
+    ["updatedat", "modifiedat", "lastseen", "lastlogin"].some((f) =>
+      n.includes(f),
+    )
+  )
+    return "activity";
+  if (
+    ["firstseen", "createdat", "insertedat", "registeredat"].some((f) =>
+      n.includes(f),
+    )
+  )
+    return "created";
   if (toks(col.name).includes("created")) return "created";
   return null;
 }
@@ -69,7 +80,11 @@ export function planTemporal(table: TableInfo): TemporalPlan | null {
   for (const col of table.columns) {
     const role = roleOf(col);
     if (!role) continue;
-    const tc: TemporalCol = { name: col.name, role, dateOnly: col.dataType === "date" };
+    const tc: TemporalCol = {
+      name: col.name,
+      role,
+      dateOnly: col.dataType === "date",
+    };
     if (role === "created") {
       if (!created) created = tc; // first creation-like column wins the anchor
     } else {
@@ -94,18 +109,29 @@ export interface TemporalWindow {
 function parseDate(s: string, which: "since" | "until"): number {
   const t = Date.parse(s);
   if (Number.isNaN(t)) {
-    throw new Error(`Invalid --${which} date "${s}" (expected an ISO date like 2023-01-01).`);
+    throw new Error(
+      `Invalid --${which} date "${s}" (expected an ISO date like 2023-01-01).`,
+    );
   }
   return t;
 }
 
 /** Resolve the coherence window from config, applying defaults and validating order. */
 export function temporalWindow(config: Config): TemporalWindow {
-  const defaultUntil = config.seed !== undefined ? Date.parse(REF_DATE) : Date.now();
-  const untilMs = config.until !== undefined ? parseDate(config.until, "until") : defaultUntil;
-  const sinceMs = config.since !== undefined ? parseDate(config.since, "since") : untilMs - 2 * YEAR_MS;
+  const defaultUntil =
+    config.seed !== undefined ? Date.parse(REF_DATE) : Date.now();
+  const untilMs =
+    config.until !== undefined
+      ? parseDate(config.until, "until")
+      : defaultUntil;
+  const sinceMs =
+    config.since !== undefined
+      ? parseDate(config.since, "since")
+      : untilMs - 2 * YEAR_MS;
   if (sinceMs > untilMs) {
-    throw new Error(`--since (${config.since}) is after --until (${config.until}).`);
+    throw new Error(
+      `--since (${config.since}) is after --until (${config.until}).`,
+    );
   }
   return { sinceMs, untilMs, futureMs: untilMs + YEAR_MS };
 }
@@ -146,7 +172,8 @@ export function applyTemporal(
   faker: Faker,
   frozen: (colName: string) => boolean,
 ): void {
-  const floor = parentFloorMs !== null ? Math.max(win.sinceMs, parentFloorMs) : win.sinceMs;
+  const floor =
+    parentFloorMs !== null ? Math.max(win.sinceMs, parentFloorMs) : win.sinceMs;
 
   let createdMs: number;
   if (frozen(plan.created.name)) {
@@ -162,7 +189,10 @@ export function applyTemporal(
     if (frozen(col.name)) continue;
     if (row[col.name] == null) continue; // keep an intentionally-null nullable column
     const hi = col.role === "future" ? win.futureMs : win.untilMs;
-    const v = faker.number.int({ min: createdMs, max: Math.max(createdMs, hi) });
+    const v = faker.number.int({
+      min: createdMs,
+      max: Math.max(createdMs, hi),
+    });
     row[col.name] = fromMs(v, col.dateOnly);
   }
 }

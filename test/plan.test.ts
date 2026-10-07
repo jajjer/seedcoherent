@@ -15,7 +15,11 @@ function usersAndOrders(): Schema {
     uniques: [["email"]],
   });
   const orders = table("orders", {
-    columns: [idCol(), col("user_id", { udtName: "int4" }), col("total", { udtName: "numeric" })],
+    columns: [
+      idCol(),
+      col("user_id", { udtName: "int4" }),
+      col("total", { udtName: "numeric" }),
+    ],
     primaryKey: ["id"],
     foreignKeys: [fk(["user_id"], "users", ["id"])],
   });
@@ -28,7 +32,11 @@ function plan(s: Schema, config: Parameters<typeof buildPlan>[3]) {
 }
 
 test("planned counts respect --rows and default-rows", () => {
-  const p = plan(usersAndOrders(), { rows: { users: 1000 }, defaultRows: 42, seed: 1 });
+  const p = plan(usersAndOrders(), {
+    rows: { users: 1000 },
+    defaultRows: 42,
+    seed: 1,
+  });
   const users = p.tables.find((t) => t.key === "public.users")!;
   const orders = p.tables.find((t) => t.key === "public.orders")!;
   assert.equal(users.rows, 1000);
@@ -45,9 +53,15 @@ test("plan lists tables in dependency order", () => {
 });
 
 test("sample is capped and does not reflect the full planned count", () => {
-  const p = plan(usersAndOrders(), { rows: { users: 1000, orders: 5000 }, seed: 1 });
+  const p = plan(usersAndOrders(), {
+    rows: { users: 1000, orders: 5000 },
+    seed: 1,
+  });
   for (const t of p.tables) {
-    assert.ok(t.sample.length <= 3, `${t.key} sample too large: ${t.sample.length}`);
+    assert.ok(
+      t.sample.length <= 3,
+      `${t.key} sample too large: ${t.sample.length}`,
+    );
   }
   // The reported count is still the real plan, not the sample size.
   assert.equal(p.tables.find((t) => t.key === "public.users")!.rows, 1000);
@@ -55,14 +69,20 @@ test("sample is capped and does not reflect the full planned count", () => {
 
 test("sampled child rows still reference sampled parents", () => {
   const p = plan(usersAndOrders(), { rows: { users: 3, orders: 3 }, seed: 7 });
-  const userIds = new Set(p.tables.find((t) => t.key === "public.users")!.sample.map((r) => r.id));
+  const userIds = new Set(
+    p.tables.find((t) => t.key === "public.users")!.sample.map((r) => r.id),
+  );
   for (const o of p.tables.find((t) => t.key === "public.orders")!.sample) {
     assert.ok(userIds.has(o.user_id), `orphan user_id ${o.user_id} in sample`);
   }
 });
 
 test("skipped tables report zero rows and no sample", () => {
-  const p = plan(usersAndOrders(), { defaultRows: 5, skip: ["orders"], seed: 1 });
+  const p = plan(usersAndOrders(), {
+    defaultRows: 5,
+    skip: ["orders"],
+    seed: 1,
+  });
   const orders = p.tables.find((t) => t.key === "public.orders")!;
   assert.equal(orders.rows, 0);
   assert.equal(orders.skipped, true);
@@ -103,7 +123,10 @@ test("buildSubsetPlan reports exact counts and anonymized samples in order", () 
   assert.equal(p.tables.find((t) => t.key === "public.orders")!.rows, 1);
   assert.equal(p.totalRows, 3);
   // The sample carries the actual (anonymized) values that would be written.
-  assert.equal(p.tables.find((t) => t.key === "public.users")!.sample[0].email, "fake1@example.com");
+  assert.equal(
+    p.tables.find((t) => t.key === "public.users")!.sample[0].email,
+    "fake1@example.com",
+  );
 });
 
 test("formatPlan marks a subset dry run as source-read, nothing-written", () => {
@@ -115,7 +138,9 @@ test("formatPlan marks a subset dry run as source-read, nothing-written", () => 
 });
 
 test("formatPlan renders counts, totals, and sample rows", () => {
-  const out = formatPlan(plan(usersAndOrders(), { rows: { users: 2, orders: 3 }, seed: 1 }));
+  const out = formatPlan(
+    plan(usersAndOrders(), { rows: { users: 2, orders: 3 }, seed: 1 }),
+  );
   assert.match(out, /Plan \(dry run/);
   assert.match(out, /public\.users/);
   assert.match(out, /public\.orders/);

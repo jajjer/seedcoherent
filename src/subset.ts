@@ -26,7 +26,11 @@ export interface RowFetcher {
   /** Seed rows: up to `limit` from a root table, in a stable order. */
   fetchRoots(table: TableInfo, limit: number): Promise<Row[]>;
   /** Rows whose `columns` tuple matches one of `keys` — for pulling parents. */
-  fetchByKeys(table: TableInfo, columns: string[], keys: unknown[][]): Promise<Row[]>;
+  fetchByKeys(
+    table: TableInfo,
+    columns: string[],
+    keys: unknown[][],
+  ): Promise<Row[]>;
   /**
    * The largest value of an integer `column` currently in `table`, or `null` if
    * the table is empty. Used by append mode to continue a synthetic PK sequence
@@ -48,11 +52,18 @@ export class PgRowFetcher implements RowFetcher {
     const order = table.primaryKey.length
       ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
       : "";
-    const res = await this.client.query(`SELECT * FROM ${qual(table)}${order} LIMIT $1`, [limit]);
+    const res = await this.client.query(
+      `SELECT * FROM ${qual(table)}${order} LIMIT $1`,
+      [limit],
+    );
     return res.rows;
   }
 
-  async fetchByKeys(table: TableInfo, columns: string[], keys: unknown[][]): Promise<Row[]> {
+  async fetchByKeys(
+    table: TableInfo,
+    columns: string[],
+    keys: unknown[][],
+  ): Promise<Row[]> {
     if (keys.length === 0) return [];
     const rows: Row[] = [];
     for (let i = 0; i < keys.length; i += KEY_CHUNK) {
@@ -85,7 +96,9 @@ export class PgRowFetcher implements RowFetcher {
   }
 
   async maxInt(table: TableInfo, column: string): Promise<number | null> {
-    const res = await this.client.query(`SELECT MAX(${ident(column)}) AS m FROM ${qual(table)}`);
+    const res = await this.client.query(
+      `SELECT MAX(${ident(column)}) AS m FROM ${qual(table)}`,
+    );
     return toInt(res.rows[0]?.m);
   }
 }
@@ -165,7 +178,10 @@ export async function collectSubset(
         needed.set(tuple.map(serialize).join("\u0000"), tuple);
       }
       if (needed.size === 0) continue;
-      add(parent, await fetcher.fetchByKeys(parent, fk.refColumns, [...needed.values()]));
+      add(
+        parent,
+        await fetcher.fetchByKeys(parent, fk.refColumns, [...needed.values()]),
+      );
     }
   }
 
@@ -199,15 +215,20 @@ function protectedColumns(schema: Schema): Map<string, Set<string>> {
 }
 
 /** Compile "table.column" / "schema.table.column" / bare "column" patterns into a matcher. */
-function columnMatcher(patterns?: string[]): (table: TableInfo, col: string) => boolean {
+function columnMatcher(
+  patterns?: string[],
+): (table: TableInfo, col: string) => boolean {
   if (!patterns || patterns.length === 0) return () => false;
   const set = new Set(patterns);
   return (table, col) =>
-    set.has(`${table.name}.${col}`) || set.has(`${table.key}.${col}`) || set.has(col);
+    set.has(`${table.name}.${col}`) ||
+    set.has(`${table.key}.${col}`) ||
+    set.has(col);
 }
 
 const MEMBER_SEP = "\u0000";
-const memberId = (tableKey: string, col: string) => `${tableKey}${MEMBER_SEP}${col}`;
+const memberId = (tableKey: string, col: string) =>
+  `${tableKey}${MEMBER_SEP}${col}`;
 const splitMember = (m: string): [string, string] => {
   const i = m.indexOf(MEMBER_SEP);
   return [m.slice(0, i), m.slice(i + 1)];
@@ -322,7 +343,9 @@ function linkGroups(
       }
     }
     if (matched.length === 0) {
-      throw new Error(`--link group "${patterns.join("=")}" matched no columns.`);
+      throw new Error(
+        `--link group "${patterns.join("=")}" matched no columns.`,
+      );
     }
     matched.forEach(ensure);
     for (let i = 1; i < matched.length; i++) union(matched[0], matched[i]);
@@ -376,7 +399,11 @@ export function anonymizeAll(
   const isPreserved = columnMatcher(config.preserve);
   const isForced = columnMatcher(config.anonymize);
   const { groupOf, members, referenced } = keyGroups(schema);
-  const { linkGroupOf, linkMembers } = linkGroups(schema, config.link, protectedBy);
+  const { linkGroupOf, linkMembers } = linkGroups(
+    schema,
+    config.link,
+    protectedBy,
+  );
 
   // Join groups (size ≥ 2) the user asked to anonymize — naming any member
   // forces the whole group, so both sides of every join move together.
@@ -401,7 +428,12 @@ export function anonymizeAll(
     const [tk, c] = splitMember(representative(members.get(root)!, referenced));
     const table = schema.tables.get(tk)!;
     const col = table.columns.find((x) => x.name === c)!;
-    const gen = inferGenerator(table, col, config.columns, parseChecks(table.checks).get(c));
+    const gen = inferGenerator(
+      table,
+      col,
+      config.columns,
+      parseChecks(table.checks).get(c),
+    );
     groupState.set(root, (st = { gen, cache: new Map(), used: new Set() }));
     return st;
   };
@@ -417,7 +449,12 @@ export function anonymizeAll(
     const [tk, c] = splitMember([...linkMembers.get(root)!].sort()[0]);
     const table = schema.tables.get(tk)!;
     const col = table.columns.find((x) => x.name === c)!;
-    const gen = inferGenerator(table, col, config.columns, parseChecks(table.checks).get(c));
+    const gen = inferGenerator(
+      table,
+      col,
+      config.columns,
+      parseChecks(table.checks).get(c),
+    );
     linkState.set(root, (st = { gen, cache: new Map(), used: new Set() }));
     return st;
   };
@@ -434,12 +471,18 @@ export function anonymizeAll(
 
     // Single-column uniques whose values we must keep distinct after scrubbing.
     const uniqueCols = new Set<string>();
-    for (const u of [table.primaryKey, ...table.uniques]) if (u.length === 1) uniqueCols.add(u[0]);
+    for (const u of [table.primaryKey, ...table.uniques])
+      if (u.length === 1) uniqueCols.add(u[0]);
 
     // Plan each column: pass through, or anonymize via group or local state.
     const plan = new Map<
       string,
-      { group?: GroupState; gen?: Generator; cache?: Map<string, unknown>; used?: Set<string> }
+      {
+        group?: GroupState;
+        gen?: Generator;
+        cache?: Map<string, unknown>;
+        used?: Set<string>;
+      }
     >();
     for (const col of emitCols) {
       const member = memberId(table.key, col.name);
@@ -448,7 +491,8 @@ export function anonymizeAll(
 
       if (joinKey) {
         // A join key moves only when its whole group is forced.
-        if (forcedGroups.has(root!)) plan.set(col.name, { group: stateForGroup(root!) });
+        if (forcedGroups.has(root!))
+          plan.set(col.name, { group: stateForGroup(root!) });
         continue;
       }
       if (isPreserved(table, col.name)) continue;
@@ -474,9 +518,21 @@ export function anonymizeAll(
         if (!p) {
           r[col.name] = row[col.name];
         } else if (p.group) {
-          r[col.name] = anonValue(faker, p.group.gen, row[col.name], p.group.cache, p.group.used);
+          r[col.name] = anonValue(
+            faker,
+            p.group.gen,
+            row[col.name],
+            p.group.cache,
+            p.group.used,
+          );
         } else {
-          r[col.name] = anonValue(faker, p.gen!, row[col.name], p.cache!, p.used);
+          r[col.name] = anonValue(
+            faker,
+            p.gen!,
+            row[col.name],
+            p.cache!,
+            p.used,
+          );
         }
       }
       return r;
@@ -503,7 +559,8 @@ function anonValue(
 
   let value = gen(faker);
   if (used) {
-    for (let i = 0; i < UNIQUE_RETRIES && used.has(serialize(value)); i++) value = gen(faker);
+    for (let i = 0; i < UNIQUE_RETRIES && used.has(serialize(value)); i++)
+      value = gen(faker);
     used.add(serialize(value));
   }
   cache.set(key, value);

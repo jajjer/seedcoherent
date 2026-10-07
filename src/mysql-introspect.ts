@@ -1,7 +1,13 @@
 /** Reads a live MySQL schema into our internal representation via information_schema. */
 
 import { rewriteInLists } from "./checks.js";
-import type { ColumnInfo, Connection, ForeignKey, Schema, TableInfo } from "./types.js";
+import type {
+  ColumnInfo,
+  Connection,
+  ForeignKey,
+  Schema,
+  TableInfo,
+} from "./types.js";
 
 /**
  * MySQL type name -> broad category we generate against. MySQL folds length,
@@ -83,7 +89,8 @@ function splitQuotedList(s: string): string[] {
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     if (ch === "'") {
-      if (inQuote && s[i + 1] === "'") i++; // escaped quote
+      if (inQuote && s[i + 1] === "'")
+        i++; // escaped quote
       else inQuote = !inQuote;
     } else if (ch === "," && !inQuote) {
       parts.push(s.slice(start, i));
@@ -110,7 +117,10 @@ function unquote(s: string): string {
  */
 export function normalizeMysqlCheck(clause: string): string {
   const requoted = clause
-    .replace(/`((?:[^`]|``)*)`/g, (_, id: string) => `"${id.replace(/``/g, "`")}"`)
+    .replace(
+      /`((?:[^`]|``)*)`/g,
+      (_, id: string) => `"${id.replace(/``/g, "`")}"`,
+    )
     // MySQL 8.4 backslash-escapes the quotes in a stored CHECK_CLAUSE
     // (`_utf8mb4\'x\'`), where 8.0 stored them bare (`_utf8mb4'x'`). Unfold those
     // `\<ch>` escapes first so the introducer strip and value-list parse below
@@ -214,9 +224,17 @@ const CHECK_SQL = `
 const toNum = (v: number | string | null): number | null =>
   v === null || v === undefined ? null : Number(v);
 
-export async function introspectMysql(client: Connection, schemas: string[]): Promise<Schema> {
-  const tableRes = await client.query<{ schema: string; table_name: string }>(TABLE_SQL, [schemas]);
-  const baseTables = new Set(tableRes.rows.map((r) => `${r.schema}.${r.table_name}`));
+export async function introspectMysql(
+  client: Connection,
+  schemas: string[],
+): Promise<Schema> {
+  const tableRes = await client.query<{ schema: string; table_name: string }>(
+    TABLE_SQL,
+    [schemas],
+  );
+  const baseTables = new Set(
+    tableRes.rows.map((r) => `${r.schema}.${r.table_name}`),
+  );
 
   const colRes = await client.query<ColumnRow>(COLUMN_SQL, [schemas]);
   const tables = new Map<string, TableInfo>();
@@ -246,7 +264,10 @@ export async function introspectMysql(client: Connection, schemas: string[]): Pr
       udtName: row.data_type,
       dataType: categorizeMysql(row.data_type, row.column_type, enumValues),
       nullable: row.is_nullable === "YES",
-      hasDefault: row.default_expr !== null || isIdentity || extra.includes("default_generated"),
+      hasDefault:
+        row.default_expr !== null ||
+        isIdentity ||
+        extra.includes("default_generated"),
       defaultExpr: row.default_expr,
       isIdentity,
       isGenerated: /\b(virtual|stored) generated\b/.test(extra),

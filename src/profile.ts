@@ -19,7 +19,13 @@
  */
 
 import { createdColumn, timestampMs } from "./temporal.js";
-import type { Config, Connection, DistSpec, Schema, TableInfo } from "./types.js";
+import type {
+  Config,
+  Connection,
+  DistSpec,
+  Schema,
+  TableInfo,
+} from "./types.js";
 
 /**
  * The aggregate queries profiling needs, abstracted so the analysis is testable
@@ -28,14 +34,21 @@ import type { Config, Connection, DistSpec, Schema, TableInfo } from "./types.js
  */
 export interface Profiler {
   /** Total rows and non-NULL count for one column. */
-  counts(table: TableInfo, column: string): Promise<{ total: number; nonNull: number }>;
+  counts(
+    table: TableInfo,
+    column: string,
+  ): Promise<{ total: number; nonNull: number }>;
   /**
    * The most common non-NULL values of a column with their row counts, most
    * frequent first, capped at `limit`. Fetching one more than the cardinality cap
    * lets the caller tell "complete, low-cardinality" from "too many to be a
    * category".
    */
-  topValues(table: TableInfo, column: string, limit: number): Promise<Array<{ value: unknown; count: number }>>;
+  topValues(
+    table: TableInfo,
+    column: string,
+    limit: number,
+  ): Promise<Array<{ value: unknown; count: number }>>;
   /**
    * Children-per-parent counts for a (possibly composite) foreign-key column set,
    * largest first, capped at `limit`. The head of this rank-frequency curve is
@@ -43,7 +56,10 @@ export interface Profiler {
    */
   fanout(table: TableInfo, columns: string[], limit: number): Promise<number[]>;
   /** Min and max of a column, raw driver values (used for the temporal window). */
-  range(table: TableInfo, column: string): Promise<{ min: unknown; max: unknown }>;
+  range(
+    table: TableInfo,
+    column: string,
+  ): Promise<{ min: unknown; max: unknown }>;
 }
 
 /** Cardinality cap: a column with more distinct values than this is not treated as categorical. */
@@ -95,7 +111,10 @@ export class SqlProfiler implements Profiler {
     private ref: (t: TableInfo) => string,
   ) {}
 
-  async counts(table: TableInfo, column: string): Promise<{ total: number; nonNull: number }> {
+  async counts(
+    table: TableInfo,
+    column: string,
+  ): Promise<{ total: number; nonNull: number }> {
     const c = this.ident(column);
     const res = await this.conn.query<{ total: unknown; non_null: unknown }>(
       `SELECT COUNT(*) AS total, COUNT(${c}) AS non_null FROM ${this.ref(table)}`,
@@ -117,7 +136,11 @@ export class SqlProfiler implements Profiler {
     return res.rows.map((r) => ({ value: r.v, count: num(r.cnt) }));
   }
 
-  async fanout(table: TableInfo, columns: string[], limit: number): Promise<number[]> {
+  async fanout(
+    table: TableInfo,
+    columns: string[],
+    limit: number,
+  ): Promise<number[]> {
     const cols = columns.map((c) => this.ident(c));
     const notNull = cols.map((c) => `${c} IS NOT NULL`).join(" AND ");
     const grouped = cols.join(", ");
@@ -128,7 +151,10 @@ export class SqlProfiler implements Profiler {
     return res.rows.map((r) => num(r.cnt));
   }
 
-  async range(table: TableInfo, column: string): Promise<{ min: unknown; max: unknown }> {
+  async range(
+    table: TableInfo,
+    column: string,
+  ): Promise<{ min: unknown; max: unknown }> {
     const c = this.ident(column);
     const res = await this.conn.query<{ lo: unknown; hi: unknown }>(
       `SELECT MIN(${c}) AS lo, MAX(${c}) AS hi FROM ${this.ref(table)}`,
@@ -189,7 +215,8 @@ function alreadySet(
  * so pin them to the column's category.
  */
 function normalizeCategory(value: unknown, dataType: string): unknown {
-  if (dataType === "boolean") return value === true || value === 1 || value === "1" || value === "true";
+  if (dataType === "boolean")
+    return value === true || value === 1 || value === "1" || value === "true";
   if (dataType === "integer") {
     const n = Number(value);
     return Number.isFinite(n) ? n : value;
@@ -307,7 +334,11 @@ export async function buildProfile(
         !alreadySet(table, col.name, config.distributions) &&
         !alreadySet(table, col.name, config.columns)
       ) {
-        const top = await profiler.topValues(table, col.name, maxCategories + 1);
+        const top = await profiler.topValues(
+          table,
+          col.name,
+          maxCategories + 1,
+        );
         // More distinct values than the cap → not a category (an id, a name, …).
         // A single value carries no spread worth weighting.
         if (top.length >= 2 && top.length <= maxCategories) {
@@ -343,8 +374,10 @@ export async function buildProfile(
       const { min, max } = await profiler.range(table, created);
       const lo = timestampMs(min);
       const hi = timestampMs(max);
-      if (lo !== null) windowMin = windowMin === null ? lo : Math.min(windowMin, lo);
-      if (hi !== null) windowMax = windowMax === null ? hi : Math.max(windowMax, hi);
+      if (lo !== null)
+        windowMin = windowMin === null ? lo : Math.min(windowMin, lo);
+      if (hi !== null)
+        windowMax = windowMax === null ? hi : Math.max(windowMax, hi);
     }
   }
 
@@ -370,7 +403,10 @@ export async function buildProfile(
  */
 export function mergeProfile(config: Config, profiled: Config): Config {
   if (profiled.distributions) {
-    config.distributions = { ...profiled.distributions, ...config.distributions };
+    config.distributions = {
+      ...profiled.distributions,
+      ...config.distributions,
+    };
   }
   if (profiled.nullRates) {
     config.nullRates = { ...profiled.nullRates, ...config.nullRates };
@@ -390,7 +426,9 @@ export function formatProfileSummary(summary: ProfileSummary): string {
     `  FK fan-out:      ${summary.zipf} foreign key(s)`,
   ];
   if (summary.window) {
-    lines.push(`  time window:     ${summary.window.since.slice(0, 10)} … ${summary.window.until.slice(0, 10)}`);
+    lines.push(
+      `  time window:     ${summary.window.since.slice(0, 10)} … ${summary.window.until.slice(0, 10)}`,
+    );
   }
   return ["Profiled existing data:", ...lines].join("\n");
 }

@@ -60,23 +60,65 @@ const toks = (s: string) =>
  * still reduces to an empty prefix.
  */
 const ROLE_TOKENS = new Set([
-  "first", "firstname", "given", "givenname", "fname",
-  "last", "lastname", "sur", "surname", "family", "familyname", "lname",
-  "middle", "middlename",
-  "name", "full", "fullname", "display", "displayname", "contact", "contactname",
-  "email", "emailaddress", "mail",
-  "user", "username", "login", "handle",
-  "gender", "sex",
-  "state", "province", "region",
-  "zip", "zipcode", "postal", "postalcode", "postcode", "code",
-  "city", "town", "municipality",
-  "country", "nation",
-  "address", "addr",
+  "first",
+  "firstname",
+  "given",
+  "givenname",
+  "fname",
+  "last",
+  "lastname",
+  "sur",
+  "surname",
+  "family",
+  "familyname",
+  "lname",
+  "middle",
+  "middlename",
+  "name",
+  "full",
+  "fullname",
+  "display",
+  "displayname",
+  "contact",
+  "contactname",
+  "email",
+  "emailaddress",
+  "mail",
+  "user",
+  "username",
+  "login",
+  "handle",
+  "gender",
+  "sex",
+  "state",
+  "province",
+  "region",
+  "zip",
+  "zipcode",
+  "postal",
+  "postalcode",
+  "postcode",
+  "code",
+  "city",
+  "town",
+  "municipality",
+  "country",
+  "nation",
+  "address",
+  "addr",
 ]);
 
 /** Roles whose value we overwrite; each must land in a text-typed column. */
 const WRITE_ROLES: ReadonlySet<Role> = new Set<Role>([
-  "first", "last", "full", "email", "username", "state", "zip", "city", "country",
+  "first",
+  "last",
+  "full",
+  "email",
+  "username",
+  "state",
+  "zip",
+  "city",
+  "country",
 ]);
 
 interface MatchCtx {
@@ -85,7 +127,8 @@ interface MatchCtx {
 }
 
 const has = (n: string, ...frags: string[]) => frags.some((f) => n.includes(f));
-const tok = (tokens: string[], ...names: string[]) => names.some((x) => tokens.includes(x));
+const tok = (tokens: string[], ...names: string[]) =>
+  names.some((x) => tokens.includes(x));
 
 /** Text-typed? Only these columns can safely hold a generated name/place string. */
 function isText(col: ColumnInfo): boolean {
@@ -116,10 +159,12 @@ function roleOf({ n, tokens }: MatchCtx): Role | null {
   if (tok(tokens, "username", "login", "handle")) return "username";
   if (has(n, "firstname", "givenname")) return "first";
   if (has(n, "lastname", "surname", "familyname")) return "last";
-  if (has(n, "fullname", "displayname", "contactname") || n === "name") return "full";
+  if (has(n, "fullname", "displayname", "contactname") || n === "name")
+    return "full";
   if (tok(tokens, "gender", "sex")) return "sex";
   if (tok(tokens, "state", "province", "region")) return "state";
-  if (has(n, "zipcode", "postalcode", "postcode") || tok(tokens, "zip")) return "zip";
+  if (has(n, "zipcode", "postalcode", "postcode") || tok(tokens, "zip"))
+    return "zip";
   if (tok(tokens, "city", "town", "municipality")) return "city";
   if (tok(tokens, "country")) return "country";
   return null;
@@ -157,7 +202,9 @@ export function planCoherence(table: TableInfo): CoherencePlan | null {
     arr.push(col.name);
     g.set(cls.role, arr);
   }
-  const groups = [...byPrefix.values()].filter((g) => hasName(g) || hasAddress(g));
+  const groups = [...byPrefix.values()].filter(
+    (g) => hasName(g) || hasAddress(g),
+  );
   return groups.length ? { groups } : null;
 }
 
@@ -203,7 +250,10 @@ export function applyCoherence(
     if (row[colName] == null) return; // keep an intentionally-null nullable column
     row[colName] = value;
   };
-  const writeAll = (cols: string[] | undefined, value: (col: string) => unknown) => {
+  const writeAll = (
+    cols: string[] | undefined,
+    value: (col: string) => unknown,
+  ) => {
     for (const c of cols ?? []) write(c, value(c));
   };
 
@@ -214,15 +264,21 @@ export function applyCoherence(
       const sexCol = g.get("sex")?.[0];
       // A frozen column keeps its pinned value and anchors the rest; a frozen
       // (or absent) value falls back to a fresh draw so derived fields still cohere.
-      const fresh = f.person.firstName(sexCol ? sexHint(row[sexCol]) : undefined);
+      const fresh = f.person.firstName(
+        sexCol ? sexHint(row[sexCol]) : undefined,
+      );
       const freshLast = f.person.lastName();
-      const first = (frozen(firstCol) ? strVal(row[firstCol]) : undefined) ?? fresh;
-      const last = (frozen(lastCol) ? strVal(row[lastCol]) : undefined) ?? freshLast;
+      const first =
+        (frozen(firstCol) ? strVal(row[firstCol]) : undefined) ?? fresh;
+      const last =
+        (frozen(lastCol) ? strVal(row[lastCol]) : undefined) ?? freshLast;
 
       writeAll(g.get("first"), () => first);
       writeAll(g.get("last"), () => last);
       writeAll(g.get("full"), () => `${first} ${last}`);
-      writeAll(g.get("email"), () => f.internet.email({ firstName: first, lastName: last }).toLowerCase());
+      writeAll(g.get("email"), () =>
+        f.internet.email({ firstName: first, lastName: last }).toLowerCase(),
+      );
       writeAll(g.get("username"), () =>
         f.internet.username({ firstName: first, lastName: last }).toLowerCase(),
       );

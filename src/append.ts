@@ -69,12 +69,14 @@ export async function planAppend(
     const table = schema.tables.get(key);
     if (!table) continue;
     for (const fk of table.foreignKeys) {
-      if (fk.refTable !== key && !generate.has(fk.refTable)) parentKeys.add(fk.refTable);
+      if (fk.refTable !== key && !generate.has(fk.refTable))
+        parentKeys.add(fk.refTable);
     }
   }
   for (const key of parentKeys) {
     const parent = schema.tables.get(key);
-    if (parent) existing.set(key, await fetcher.fetchRoots(parent, parentLimit));
+    if (parent)
+      existing.set(key, await fetcher.fetchRoots(parent, parentLimit));
   }
 
   // Grown tables with a synthetic id continue past the current maximum.

@@ -33,7 +33,11 @@ export function sqliteLiteral(v: unknown, col: ColumnInfo): string {
   if (typeof v === "bigint") return String(v);
   if (v instanceof Date) return `'${v.toISOString()}'`;
   if (Buffer.isBuffer(v)) return `X'${v.toString("hex")}'`;
-  if (Array.isArray(v) || JSON_TYPES.has(col.dataType) || typeof v === "object") {
+  if (
+    Array.isArray(v) ||
+    JSON_TYPES.has(col.dataType) ||
+    typeof v === "object"
+  ) {
     return `'${escapeString(JSON.stringify(v))}'`;
   }
   return `'${escapeString(String(v))}'`;
@@ -45,9 +49,14 @@ export function sqliteLiteral(v: unknown, col: ColumnInfo): string {
  * first unique constraint. Returns an empty string when there is no usable
  * target or no updatable non-key columns (falls back to a plain INSERT).
  */
-function sqliteConflictClause(table: TableInfo, columns: ColumnInfo[], action: OnConflict | undefined): string {
+function sqliteConflictClause(
+  table: TableInfo,
+  columns: ColumnInfo[],
+  action: OnConflict | undefined,
+): string {
   if (action !== "update") return "";
-  const target = table.primaryKey.length > 0 ? table.primaryKey : (table.uniques[0] ?? []);
+  const target =
+    table.primaryKey.length > 0 ? table.primaryKey : (table.uniques[0] ?? []);
   const targetSet = new Set(target);
   const setCols = columns
     .filter((c) => !targetSet.has(c.name) && !c.isIdentity && !c.isGenerated)
@@ -61,8 +70,15 @@ function sqliteConflictClause(table: TableInfo, columns: ColumnInfo[], action: O
  * (`PRAGMA foreign_keys=OFF`, which must sit outside the transaction) so the
  * script applies regardless of insert order.
  */
-export function toSqlSqlite(data: TableData[], opts: ScriptOptions = {}): string {
-  const parts: string[] = ["PRAGMA foreign_keys=OFF;", "BEGIN TRANSACTION;", ""];
+export function toSqlSqlite(
+  data: TableData[],
+  opts: ScriptOptions = {},
+): string {
+  const parts: string[] = [
+    "PRAGMA foreign_keys=OFF;",
+    "BEGIN TRANSACTION;",
+    "",
+  ];
   // INSERT OR IGNORE skips a row that violates a primary/unique constraint
   // instead of aborting, making the script re-runnable against a populated DB.
   const orIgnore = opts.onConflict === "skip" ? " OR IGNORE" : "";
@@ -73,10 +89,16 @@ export function toSqlSqlite(data: TableData[], opts: ScriptOptions = {}): string
     parts.push(`-- ${table.key}: ${rows.length} rows`);
     parts.push(`INSERT${orIgnore} INTO ${tableRef(table)} (${colList}) VALUES`);
     const values = rows.map((row) => {
-      const tuple = columns.map((c) => sqliteLiteral(row[c.name], c)).join(", ");
+      const tuple = columns
+        .map((c) => sqliteLiteral(row[c.name], c))
+        .join(", ");
       return `  (${tuple})`;
     });
-    parts.push(values.join(",\n") + sqliteConflictClause(table, columns, opts.onConflict) + ";");
+    parts.push(
+      values.join(",\n") +
+        sqliteConflictClause(table, columns, opts.onConflict) +
+        ";",
+    );
     parts.push("");
   }
 
@@ -94,7 +116,11 @@ export function toParam(v: unknown, col: ColumnInfo): unknown {
   if (typeof v === "boolean") return v ? 1 : 0;
   if (v instanceof Date) return v.toISOString();
   if (Buffer.isBuffer(v)) return v;
-  if (Array.isArray(v) || JSON_TYPES.has(col.dataType) || typeof v === "object") {
+  if (
+    Array.isArray(v) ||
+    JSON_TYPES.has(col.dataType) ||
+    typeof v === "object"
+  ) {
     return JSON.stringify(v);
   }
   return v;
@@ -167,10 +193,20 @@ export class SqliteSink implements RowSink {
     if (!table) throw new Error("SqliteSink.write called before begin");
     const cols = this.currentCols;
     // Rows per statement: honor batchSize but never exceed the bind-param cap.
-    const perStatement = Math.max(1, Math.min(this.batchSize, Math.floor(MAX_BIND_PARAMS / Math.max(cols.length, 1))));
+    const perStatement = Math.max(
+      1,
+      Math.min(
+        this.batchSize,
+        Math.floor(MAX_BIND_PARAMS / Math.max(cols.length, 1)),
+      ),
+    );
     try {
       for (let start = 0; start < rows.length; start += perStatement) {
-        await this.insertChunk(table, cols, rows.slice(start, start + perStatement));
+        await this.insertChunk(
+          table,
+          cols,
+          rows.slice(start, start + perStatement),
+        );
       }
     } catch (err) {
       await this.abort();
@@ -178,7 +214,11 @@ export class SqliteSink implements RowSink {
     }
   }
 
-  private async insertChunk(table: TableInfo, cols: ColumnInfo[], rows: Row[]): Promise<void> {
+  private async insertChunk(
+    table: TableInfo,
+    cols: ColumnInfo[],
+    rows: Row[],
+  ): Promise<void> {
     if (rows.length === 0) return;
     const colList = cols.map((c) => IDENT(c.name)).join(", ");
     const placeholder = `(${cols.map(() => "?").join(", ")})`;
@@ -187,7 +227,8 @@ export class SqliteSink implements RowSink {
       for (const c of cols) params.push(toParam(row[c.name], c));
     }
     const sql =
-      `INSERT INTO ${tableRef(table)} (${colList}) VALUES ` + rows.map(() => placeholder).join(", ");
+      `INSERT INTO ${tableRef(table)} (${colList}) VALUES ` +
+      rows.map(() => placeholder).join(", ");
     await this.conn.query(sql, params);
     this.total += rows.length;
   }
@@ -223,7 +264,11 @@ export async function insertDataSqlite(
   opts: { truncate?: boolean; batchSize?: number } = {},
 ): Promise<number> {
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
-  const sink = new SqliteSink(conn, { truncate: opts.truncate, tables: data.map((d) => d.table) }, batchSize);
+  const sink = new SqliteSink(
+    conn,
+    { truncate: opts.truncate, tables: data.map((d) => d.table) },
+    batchSize,
+  );
   for (const { table, rows, columns } of data) {
     await sink.begin(table, columns);
     await sink.write(rows);

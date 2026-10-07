@@ -75,7 +75,11 @@ test("an override fills an unsupported column instead of NULL", () => {
     columns: [idCol(), col("shape", { udtName: "geometry" })],
     primaryKey: ["id"],
   });
-  const config: Config = { defaultRows: 2, seed: 1, columns: { "docs.shape": { value: "POINT(0 0)" } } };
+  const config: Config = {
+    defaultRows: 2,
+    seed: 1,
+    columns: { "docs.shape": { value: "POINT(0 0)" } },
+  };
   const [d] = gen(schema(t), config);
   assert.ok(d.columns.some((c) => c.name === "shape"));
   for (const r of d.rows) assert.equal(r.shape, "POINT(0 0)");

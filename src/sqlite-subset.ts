@@ -17,11 +17,18 @@ export class SqliteRowFetcher implements RowFetcher {
     const order = table.primaryKey.length
       ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
       : "";
-    const res = await this.conn.query<Row>(`SELECT * FROM ${ref(table)}${order} LIMIT ?`, [limit]);
+    const res = await this.conn.query<Row>(
+      `SELECT * FROM ${ref(table)}${order} LIMIT ?`,
+      [limit],
+    );
     return res.rows;
   }
 
-  async fetchByKeys(table: TableInfo, columns: string[], keys: unknown[][]): Promise<Row[]> {
+  async fetchByKeys(
+    table: TableInfo,
+    columns: string[],
+    keys: unknown[][],
+  ): Promise<Row[]> {
     if (keys.length === 0) return [];
     const rows: Row[] = [];
     for (let i = 0; i < keys.length; i += KEY_CHUNK) {
@@ -55,7 +62,9 @@ export class SqliteRowFetcher implements RowFetcher {
   }
 
   async maxInt(table: TableInfo, column: string): Promise<number | null> {
-    const res = await this.conn.query<Row>(`SELECT MAX(${ident(column)}) AS m FROM ${ref(table)}`);
+    const res = await this.conn.query<Row>(
+      `SELECT MAX(${ident(column)}) AS m FROM ${ref(table)}`,
+    );
     return toInt(res.rows[0]?.m);
   }
 }

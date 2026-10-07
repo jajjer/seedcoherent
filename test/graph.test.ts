@@ -90,7 +90,11 @@ test("composite foreign key still orders parent first", () => {
     primaryKey: ["a", "b"],
   });
   const child = table("child", {
-    columns: [idCol(), col("pa", { udtName: "int4" }), col("pb", { udtName: "int4" })],
+    columns: [
+      idCol(),
+      col("pa", { udtName: "int4" }),
+      col("pb", { udtName: "int4" }),
+    ],
     primaryKey: ["id"],
     foreignKeys: [fk(["pa", "pb"], "parent", ["a", "b"])],
   });
@@ -105,8 +109,9 @@ test("every table receives exactly one order slot", () => {
   const c = table("c", { columns: [idCol()], primaryKey: ["id"] });
   const { order } = topoSort(schema(a, b, c));
 
-  assert.deepEqual(
-    [...order.map((t) => t.key)].sort(),
-    ["public.a", "public.b", "public.c"],
-  );
+  assert.deepEqual([...order.map((t) => t.key)].sort(), [
+    "public.a",
+    "public.b",
+    "public.c",
+  ]);
 });

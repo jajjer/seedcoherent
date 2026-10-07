@@ -8,7 +8,10 @@ import { col, table } from "./helpers.js";
 
 class RecordingConn implements Connection {
   calls: { sql: string; params?: unknown[] }[] = [];
-  async query<T = any>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+  async query<T = any>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }> {
     this.calls.push({ sql, params });
     return { rows: [] as T[] };
   }
@@ -24,21 +27,30 @@ const users = table("users", {
 test("fetchRoots orders by PK and binds the limit", async () => {
   const conn = new RecordingConn();
   await new MysqlRowFetcher(conn).fetchRoots(users, 25);
-  assert.equal(conn.calls[0].sql, "SELECT * FROM `app`.`users` ORDER BY `id` LIMIT ?");
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT * FROM `app`.`users` ORDER BY `id` LIMIT ?",
+  );
   assert.deepEqual(conn.calls[0].params, [25]);
 });
 
 test("fetchByKeys uses IN (?) for a single-column key", async () => {
   const conn = new RecordingConn();
   await new MysqlRowFetcher(conn).fetchByKeys(users, ["id"], [[1], [2], [3]]);
-  assert.equal(conn.calls[0].sql, "SELECT * FROM `app`.`users` WHERE `id` IN (?)");
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT * FROM `app`.`users` WHERE `id` IN (?)",
+  );
   assert.deepEqual(conn.calls[0].params, [[1, 2, 3]]);
 });
 
 test("fetchByKeys uses a row-constructor IN list for composite keys", async () => {
   const membership = table("membership", {
     schema: "app",
-    columns: [col("org_id", { udtName: "int" }), col("user_id", { udtName: "int" })],
+    columns: [
+      col("org_id", { udtName: "int" }),
+      col("user_id", { udtName: "int" }),
+    ],
     primaryKey: ["org_id", "user_id"],
   });
   const conn = new RecordingConn();

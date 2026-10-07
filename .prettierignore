@@ -1,0 +1,9 @@
+dist
+node_modules
+package-lock.json
+demo
+.claude
+.context
+
+# Hand-wrapped prose — reflowing would create large, valueless diffs.
+*.md

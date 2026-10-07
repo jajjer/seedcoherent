@@ -12,7 +12,10 @@ import type {
 } from "./types.js";
 
 /** Postgres udt/base type name -> broad category we generate against. */
-export function categorize(udtName: string, enumValues: string[] | null): string {
+export function categorize(
+  udtName: string,
+  enumValues: string[] | null,
+): string {
   if (enumValues) return "enum";
   if (udtName.startsWith("_")) return "array";
   switch (udtName) {
@@ -122,7 +125,10 @@ async function buildTypeResolver(
   for (const row of typeRes.rows) catalog.set(String(row.oid), row);
 
   const fieldRes = await client.query(COMPOSITE_FIELD_SQL);
-  const compositeFields = new Map<string, { attname: string; atttypid: string }[]>();
+  const compositeFields = new Map<
+    string,
+    { attname: string; atttypid: string }[]
+  >();
   for (const row of fieldRes.rows) {
     const list = compositeFields.get(String(row.typrelid)) ?? [];
     list.push({ attname: row.attname, atttypid: String(row.atttypid) });
@@ -135,33 +141,68 @@ async function buildTypeResolver(
     enumValues: r.enumValues,
   });
 
-  function resolve(oidRaw: string | number, seen = new Set<string>()): ResolvedType {
+  function resolve(
+    oidRaw: string | number,
+    seen = new Set<string>(),
+  ): ResolvedType {
     const oid = String(oidRaw);
     const t = catalog.get(oid);
-    if (!t || seen.has(oid)) return { udtName: t?.typname ?? "text", dataType: "text", enumValues: null };
+    if (!t || seen.has(oid))
+      return {
+        udtName: t?.typname ?? "text",
+        dataType: "text",
+        enumValues: null,
+      };
     seen.add(oid);
     try {
       if (t.typtype === "d") {
         return { ...resolve(t.typbasetype, seen), domainOid: oid };
       }
       if (t.typtype === "e") {
-        return { udtName: t.typname, dataType: "enum", enumValues: enumsByOid.get(oid) ?? null };
+        return {
+          udtName: t.typname,
+          dataType: "enum",
+          enumValues: enumsByOid.get(oid) ?? null,
+        };
       }
       if (t.typtype === "c") {
-        const fields: CompositeField[] = (compositeFields.get(String(t.typrelid)) ?? []).map((fld) => ({
+        const fields: CompositeField[] = (
+          compositeFields.get(String(t.typrelid)) ?? []
+        ).map((fld) => ({
           name: fld.attname,
           ...ref(resolve(fld.atttypid, seen)),
         }));
-        return { udtName: t.typname, dataType: "composite", enumValues: null, compositeFields: fields };
+        return {
+          udtName: t.typname,
+          dataType: "composite",
+          enumValues: null,
+          compositeFields: fields,
+        };
       }
       if (t.typtype === "r") {
-        const sub = t.rngsubtype ? ref(resolve(t.rngsubtype, seen)) : { udtName: "text", dataType: "text", enumValues: null };
-        return { udtName: t.typname, dataType: "range", enumValues: null, rangeSubtype: sub };
+        const sub = t.rngsubtype
+          ? ref(resolve(t.rngsubtype, seen))
+          : { udtName: "text", dataType: "text", enumValues: null };
+        return {
+          udtName: t.typname,
+          dataType: "range",
+          enumValues: null,
+          rangeSubtype: sub,
+        };
       }
       if (t.typcategory === "A" && t.typelem && t.typelem !== "0") {
-        return { udtName: t.typname, dataType: "array", enumValues: null, elementType: ref(resolve(t.typelem, seen)) };
+        return {
+          udtName: t.typname,
+          dataType: "array",
+          enumValues: null,
+          elementType: ref(resolve(t.typelem, seen)),
+        };
       }
-      return { udtName: t.typname, dataType: categorize(t.typname, null), enumValues: null };
+      return {
+        udtName: t.typname,
+        dataType: categorize(t.typname, null),
+        enumValues: null,
+      };
     } finally {
       seen.delete(oid);
     }
@@ -171,7 +212,9 @@ async function buildTypeResolver(
 }
 
 /** Fetch domain oid -> CHECK expression texts (operands use the `VALUE` keyword). */
-async function loadDomainChecks(client: Connection): Promise<Map<string, string[]>> {
+async function loadDomainChecks(
+  client: Connection,
+): Promise<Map<string, string[]>> {
   const res = await client.query(DOMAIN_CHECK_SQL);
   const out = new Map<string, string[]>();
   for (const row of res.rows) {
@@ -267,7 +310,11 @@ const PARTITION_BOUND_SQL = `
     AND child.relispartition;
 `;
 
-const STRATEGY: Record<string, PartitionInfo["strategy"]> = { r: "range", l: "list", h: "hash" };
+const STRATEGY: Record<string, PartitionInfo["strategy"]> = {
+  r: "range",
+  l: "list",
+  h: "hash",
+};
 
 /** Read partitioning metadata and attach it to the matching parent tables. */
 async function loadPartitions(
@@ -284,7 +331,11 @@ async function loadPartitions(
     if (!table || !attnums) continue;
     // partattrs is an int2vector rendered as space-separated attnums; 0 marks an
     // expression key we can't constrain by column name.
-    const attrs = String(row.partattrs).trim().split(/\s+/).filter(Boolean).map(Number);
+    const attrs = String(row.partattrs)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(Number);
     const keyColumns = attrs.every((n) => n > 0)
       ? attrs.map((n) => attnums.get(n)!).filter(Boolean)
       : [];
@@ -315,7 +366,10 @@ function applyBound(part: PartitionInfo, bound: string): void {
   if (part.strategy === "range") {
     const m = b.match(/^FOR\s+VALUES\s+FROM\s*\((.*)\)\s*TO\s*\((.*)\)$/is);
     if (!m) return;
-    part.ranges!.push({ from: firstBoundValue(m[1]), to: firstBoundValue(m[2]) });
+    part.ranges!.push({
+      from: firstBoundValue(m[1]),
+      to: firstBoundValue(m[2]),
+    });
   } else if (part.strategy === "list") {
     const m = b.match(/^FOR\s+VALUES\s+IN\s*\((.*)\)$/is);
     if (!m) return;
@@ -342,7 +396,8 @@ function splitTuple(s: string): string[] {
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     if (ch === "'") {
-      if (inQuote && s[i + 1] === "'") i++; // escaped quote
+      if (inQuote && s[i + 1] === "'")
+        i++; // escaped quote
       else inQuote = !inQuote;
     } else if (ch === "," && !inQuote) {
       parts.push(s.slice(start, i));
@@ -355,15 +410,23 @@ function splitTuple(s: string): string[] {
 
 /** Strip a `'...'::type` cast/quoting to the raw scalar text, or null. */
 function unquoteLiteral(s: string): string | null {
-  let t = s.trim().replace(/::\s*[a-zA-Z_][\w .]*(\(\d+(,\d+)?\))?(\[\])?$/, "").trim();
+  const t = s
+    .trim()
+    .replace(/::\s*[a-zA-Z_][\w .]*(\(\d+(,\d+)?\))?(\[\])?$/, "")
+    .trim();
   const q = t.match(/^'((?:[^']|'')*)'$/);
   if (q) return q[1].replace(/''/g, "'");
   return t.length ? t : null;
 }
 
-export async function introspect(client: Connection, schemas: string[] = ["public"]): Promise<Schema> {
+export async function introspect(
+  client: Connection,
+  schemas: string[] = ["public"],
+): Promise<Schema> {
   // Enums first: map type oid -> ordered labels.
-  const enumRes = await client.query<{ type_oid: string; label: string }>(ENUM_SQL);
+  const enumRes = await client.query<{ type_oid: string; label: string }>(
+    ENUM_SQL,
+  );
   const enumsByOid = new Map<string, string[]>();
   for (const row of enumRes.rows) {
     const oid = String(row.type_oid);
@@ -422,7 +485,9 @@ export async function introspect(client: Connection, schemas: string[] = ["publi
     // so the ordinary check parser can bound the generated value.
     if (rt.domainOid) {
       for (const expr of domainChecks.get(rt.domainOid) ?? []) {
-        table.checks.push({ expr: expr.replace(/\bVALUE\b/g, `"${col.name}"`) });
+        table.checks.push({
+          expr: expr.replace(/\bVALUE\b/g, `"${col.name}"`),
+        });
       }
     }
   }
@@ -439,7 +504,9 @@ export async function introspect(client: Connection, schemas: string[] = ["publi
       continue;
     }
 
-    const cols: string[] = (row.conkey as number[]).map((n) => attnums.get(n)!).filter(Boolean);
+    const cols: string[] = (row.conkey as number[])
+      .map((n) => attnums.get(n)!)
+      .filter(Boolean);
 
     if (row.contype === "p") {
       table.primaryKey = cols;
@@ -449,7 +516,9 @@ export async function introspect(client: Connection, schemas: string[] = ["publi
       const refKey = `${row.ref_schema}.${row.ref_table}`;
       const refAttnums = attnumMap.get(refKey);
       const refColumns: string[] = refAttnums
-        ? (row.confkey as number[]).map((n) => refAttnums.get(n)!).filter(Boolean)
+        ? (row.confkey as number[])
+            .map((n) => refAttnums.get(n)!)
+            .filter(Boolean)
         : [];
       const fk: ForeignKey = { columns: cols, refTable: refKey, refColumns };
       table.foreignKeys.push(fk);

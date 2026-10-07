@@ -30,15 +30,24 @@ test("dates become quoted ISO strings", () => {
 });
 
 test("buffers become bytea hex literals", () => {
-  assert.equal(sqlLiteral(Buffer.from("AB"), col("b", { udtName: "bytea" })), "'\\x4142'");
+  assert.equal(
+    sqlLiteral(Buffer.from("AB"), col("b", { udtName: "bytea" })),
+    "'\\x4142'",
+  );
 });
 
 test("arrays become Postgres array literals with quoted elements", () => {
-  assert.equal(sqlLiteral(["a", "b"], col("t", { udtName: "_text" })), `'{"a","b"}'`);
+  assert.equal(
+    sqlLiteral(["a", "b"], col("t", { udtName: "_text" })),
+    `'{"a","b"}'`,
+  );
 });
 
 test("array elements with quotes/backslashes are escaped", () => {
-  assert.equal(sqlLiteral(['a"b', "c\\d"], col("t", { udtName: "_text" })), `'{"a\\"b","c\\\\d"}'`);
+  assert.equal(
+    sqlLiteral(['a"b', "c\\d"], col("t", { udtName: "_text" })),
+    `'{"a\\"b","c\\\\d"}'`,
+  );
 });
 
 test("objects and json columns are JSON-encoded and cast to jsonb", () => {
@@ -49,7 +58,7 @@ test("a json column holding an array emits a JSON array, not a Postgres array", 
   // The value is a JS array but the column is jsonb, so it must serialize to
   // `["a","b"]::jsonb`, never the Postgres array literal `{"a","b"}`.
   assert.equal(sqlLiteral(["a", "b"], jsonCol), `'["a","b"]'::jsonb`);
-  assert.equal(copyValue(["a", "b"], jsonCol), `[\"a\",\"b\"]`);
+  assert.equal(copyValue(["a", "b"], jsonCol), `["a","b"]`);
 });
 
 test("single quotes in strings are doubled", () => {
@@ -57,7 +66,10 @@ test("single quotes in strings are doubled", () => {
 });
 
 test("single quotes inside json are doubled", () => {
-  assert.equal(sqlLiteral({ name: "O'Brien" }, jsonCol), `'{"name":"O''Brien"}'::jsonb`);
+  assert.equal(
+    sqlLiteral({ name: "O'Brien" }, jsonCol),
+    `'{"name":"O''Brien"}'::jsonb`,
+  );
 });
 
 // ---- copyValue (COPY text format) ----
@@ -84,7 +96,10 @@ test("copy dates become ISO strings", () => {
 
 test("copy buffers become bytea hex with a doubled backslash", () => {
   // Field text is \\x4142 so Postgres un-escapes it to \x4142 (bytea hex).
-  assert.equal(copyValue(Buffer.from("AB"), col("b", { udtName: "bytea" })), "\\\\x4142");
+  assert.equal(
+    copyValue(Buffer.from("AB"), col("b", { udtName: "bytea" })),
+    "\\\\x4142",
+  );
 });
 
 test("copy escapes tab, newline, carriage return, and backslash", () => {
@@ -92,18 +107,27 @@ test("copy escapes tab, newline, carriage return, and backslash", () => {
 });
 
 test("copy arrays become escaped Postgres array literals", () => {
-  assert.equal(copyValue(["a", "b"], col("t", { udtName: "_text" })), `{"a","b"}`);
+  assert.equal(
+    copyValue(["a", "b"], col("t", { udtName: "_text" })),
+    `{"a","b"}`,
+  );
 });
 
 test("copy array elements with quotes/backslashes get doubled backslashes", () => {
   // Array literal is {"a\"b"}; the backslash is data, so COPY doubles it.
-  assert.equal(copyValue(['a"b'], col("t", { udtName: "_text" })), `{"a\\\\"b"}`);
+  assert.equal(
+    copyValue(['a"b'], col("t", { udtName: "_text" })),
+    `{"a\\\\"b"}`,
+  );
 });
 
 test("copy objects/json are JSON-encoded with embedded controls escaped", () => {
   // JSON.stringify turns the newline/tab into \n and \t; copyEscape then doubles
   // those backslashes so the COPY parser hands Postgres the original \n / \t.
-  assert.equal(copyValue({ note: "line1\nline2\t!" }, jsonCol), `{"note":"line1\\\\nline2\\\\t!"}`);
+  assert.equal(
+    copyValue({ note: "line1\nline2\t!" }, jsonCol),
+    `{"note":"line1\\\\nline2\\\\t!"}`,
+  );
 });
 
 // ---- toSql script assembly ----
@@ -171,7 +195,10 @@ test("onConflict: update emits ON CONFLICT (pk) DO UPDATE SET non-key cols", () 
   // usersData: primaryKey=["id"] (isIdentity=true), columns=[id, email]
   // target = ["id"]; id is excluded (in target); email → SET clause
   const sql = toSql([usersData()], { onConflict: "update" });
-  assert.match(sql, /ON CONFLICT \("id"\) DO UPDATE SET "email" = EXCLUDED\."email";/);
+  assert.match(
+    sql,
+    /ON CONFLICT \("id"\) DO UPDATE SET "email" = EXCLUDED\."email";/,
+  );
   assert.doesNotMatch(sql, /DO NOTHING/);
 });
 

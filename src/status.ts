@@ -49,13 +49,34 @@ const toks = (s: string) =>
  * predecessors' markers are left alone rather than forced non-null.
  */
 const BRANCH_LABELS = new Set([
-  "cancelled", "canceled", "refunded", "rejected", "failed", "declined",
-  "returned", "voided", "abandoned", "denied", "reversed", "chargeback",
-  "errored", "error", "disputed", "revoked",
+  "cancelled",
+  "canceled",
+  "refunded",
+  "rejected",
+  "failed",
+  "declined",
+  "returned",
+  "voided",
+  "abandoned",
+  "denied",
+  "reversed",
+  "chargeback",
+  "errored",
+  "error",
+  "disputed",
+  "revoked",
 ]);
 
 /** Column-name tokens that mark a column as a point-in-time event stamp. */
-const MARKER_SUFFIX = new Set(["at", "date", "on", "time", "timestamp", "ts", "datetime"]);
+const MARKER_SUFFIX = new Set([
+  "at",
+  "date",
+  "on",
+  "time",
+  "timestamp",
+  "ts",
+  "datetime",
+]);
 
 /**
  * Participle → root for a few common state verbs, so `ship_date` associates with
@@ -64,12 +85,29 @@ const MARKER_SUFFIX = new Set(["at", "date", "on", "time", "timestamp", "ts", "d
  * naming; this only fills the gap for the shortened root form.
  */
 const LABEL_ROOTS: Record<string, string> = {
-  shipped: "ship", delivered: "deliver", cancelled: "cancel", canceled: "cancel",
-  refunded: "refund", completed: "complete", approved: "approve", rejected: "reject",
-  paid: "pay", resolved: "resolve", closed: "close", published: "publish",
-  archived: "archive", activated: "activate", deleted: "delete", returned: "return",
-  fulfilled: "fulfill", confirmed: "confirm", verified: "verify", processed: "process",
-  received: "receive", accepted: "accept", declined: "decline",
+  shipped: "ship",
+  delivered: "deliver",
+  cancelled: "cancel",
+  canceled: "cancel",
+  refunded: "refund",
+  completed: "complete",
+  approved: "approve",
+  rejected: "reject",
+  paid: "pay",
+  resolved: "resolve",
+  closed: "close",
+  published: "publish",
+  archived: "archive",
+  activated: "activate",
+  deleted: "delete",
+  returned: "return",
+  fulfilled: "fulfill",
+  confirmed: "confirm",
+  verified: "verify",
+  processed: "process",
+  received: "receive",
+  accepted: "accept",
+  declined: "decline",
 };
 
 interface Marker {
@@ -89,7 +127,10 @@ export interface StatusPlan {
 }
 
 /** A column is a status column if its value domain is a bounded label set. */
-function labelDomain(col: ColumnInfo, check: ColumnCheck | undefined): string[] | null {
+function labelDomain(
+  col: ColumnInfo,
+  check: ColumnCheck | undefined,
+): string[] | null {
   if (col.enumValues && col.enumValues.length >= 2) return col.enumValues;
   const inSet = check?.in;
   if (inSet && inSet.length >= 2 && inSet.every((v) => typeof v === "string")) {
@@ -101,7 +142,9 @@ function labelDomain(col: ColumnInfo, check: ColumnCheck | undefined): string[] 
 /** Does this column's name read like a lifecycle-state column? */
 function isStatusName(col: ColumnInfo): boolean {
   const t = toks(col.name);
-  return t.some((x) => x === "status" || x === "state" || x === "phase" || x === "stage");
+  return t.some(
+    (x) => x === "status" || x === "state" || x === "phase" || x === "stage",
+  );
 }
 
 /** Is `col` an event-marker for `label`? A date/timestamp column carrying the label stem. */
@@ -126,7 +169,10 @@ function markerFor(col: ColumnInfo, label: string): boolean {
  * Each marker column is assigned to the single most-specific (longest) label it
  * matches, so a column is never governed by two conflicting states.
  */
-export function planStatus(table: TableInfo, checks: Map<string, ColumnCheck>): StatusPlan | null {
+export function planStatus(
+  table: TableInfo,
+  checks: Map<string, ColumnCheck>,
+): StatusPlan | null {
   let statusColumn: string | undefined;
   let labels: string[] | undefined;
   for (const col of table.columns) {
@@ -151,7 +197,11 @@ export function planStatus(table: TableInfo, checks: Map<string, ColumnCheck>): 
       claimed.add(col.name);
       const key = label.toLowerCase();
       const arr = markers.get(key) ?? [];
-      arr.push({ column: col.name, dateOnly: col.dataType === "date", nullable: col.nullable });
+      arr.push({
+        column: col.name,
+        dateOnly: col.dataType === "date",
+        nullable: col.nullable,
+      });
       markers.set(key, arr);
     }
   }
@@ -213,7 +263,8 @@ export function applyStatus(
     // states and every branch state have not happened, so their markers are null.
     let floor = base;
     plan.progress.forEach((label, i) => {
-      if (i <= idx) for (const m of markersFor(label)) floor = setAfter(m, floor);
+      if (i <= idx)
+        for (const m of markersFor(label)) floor = setAfter(m, floor);
       else markersFor(label).forEach(clear);
     });
     for (const label of plan.branch) markersFor(label).forEach(clear);
@@ -221,6 +272,7 @@ export function applyStatus(
     // A branch state: its own marker is set, sibling branches are cleared, and the
     // progress markers are left as generated (how far it advanced is unknown).
     for (const m of markersFor(status)) setAfter(m, base);
-    for (const label of plan.branch) if (label !== status) markersFor(label).forEach(clear);
+    for (const label of plan.branch)
+      if (label !== status) markersFor(label).forEach(clear);
   }
 }

@@ -23,7 +23,13 @@ function rowsFor(data: ReturnType<typeof build>, key: string) {
 function peopleTable(): Schema {
   return schema(
     table("people", {
-      columns: [idCol(), col("first_name"), col("last_name"), col("full_name"), col("email")],
+      columns: [
+        idCol(),
+        col("first_name"),
+        col("last_name"),
+        col("full_name"),
+        col("email"),
+      ],
       primaryKey: ["id"],
     }),
   );
@@ -59,7 +65,10 @@ test("resolveLocale: rejects an unknown code with the list of valid ones", () =>
 });
 
 test("an unset locale is byte-identical to the default", () => {
-  const a = rowsFor(build(peopleTable(), { rows: { people: 50 }, seed: 9 }), "public.people");
+  const a = rowsFor(
+    build(peopleTable(), { rows: { people: 50 }, seed: 9 }),
+    "public.people",
+  );
   const b = rowsFor(
     build(peopleTable(), { rows: { people: 50 }, seed: 9, locale: undefined }),
     "public.people",
@@ -76,7 +85,10 @@ test("a locale is deterministic under a seed", () => {
 });
 
 test("a non-US locale changes generated values", () => {
-  const us = rowsFor(build(peopleTable(), { rows: { people: 50 }, seed: 5 }), "public.people");
+  const us = rowsFor(
+    build(peopleTable(), { rows: { people: 50 }, seed: 5 }),
+    "public.people",
+  );
   const de = rowsFor(
     build(peopleTable(), { rows: { people: 50 }, seed: 5, locale: "de" }),
     "public.people",
@@ -99,11 +111,19 @@ test("name coherence still holds under a non-US locale", () => {
 
 test("US address coherence still applies under an explicit en_US locale", () => {
   const rows = rowsFor(
-    build(addressTable(), { rows: { addresses: 100 }, seed: 6, locale: "en_US" }),
+    build(addressTable(), {
+      rows: { addresses: 100 },
+      seed: 6,
+      locale: "en_US",
+    }),
     "public.addresses",
   );
   for (const r of rows) {
-    assert.match(String(r.state), /^[A-Z]{2}$/, `state ${r.state} is not a 2-letter abbr`);
+    assert.match(
+      String(r.state),
+      /^[A-Z]{2}$/,
+      `state ${r.state} is not a 2-letter abbr`,
+    );
     assert.equal(r.country, "United States");
   }
 });
@@ -116,7 +136,11 @@ test("a non-US locale skips US address coherence (in-locale values instead)", ()
   // No row is forced into the US shape: states aren't 2-letter US abbreviations
   // and the country isn't the hardcoded English "United States".
   const anyUsState = rows.some((r) => /^[A-Z]{2}$/.test(String(r.state)));
-  assert.equal(anyUsState, false, "a non-US locale should not emit 2-letter US state abbreviations");
+  assert.equal(
+    anyUsState,
+    false,
+    "a non-US locale should not emit 2-letter US state abbreviations",
+  );
   for (const r of rows) {
     assert.notEqual(r.country, "United States");
   }

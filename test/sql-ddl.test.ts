@@ -10,7 +10,10 @@ import type { Schema, TableInfo } from "../src/types.js";
 
 function tbl(s: Schema, key: string): TableInfo {
   const t = s.tables.get(key);
-  assert.ok(t, `expected table ${key}; have ${[...s.tables.keys()].join(", ")}`);
+  assert.ok(
+    t,
+    `expected table ${key}; have ${[...s.tables.keys()].join(", ")}`,
+  );
   return t;
 }
 
@@ -20,7 +23,8 @@ function column(t: TableInfo, name: string) {
   return c;
 }
 
-const load = (sql: string, dialect: SqlDialect) => loadSchemaFromSqlDdl(sql, dialect);
+const load = (sql: string, dialect: SqlDialect) =>
+  loadSchemaFromSqlDdl(sql, dialect);
 
 test("mysql: maps types, length/precision, nullability, and AUTO_INCREMENT identity", () => {
   const s = load(
@@ -119,7 +123,11 @@ test("mysql: inline, table-level (CONSTRAINT), and ALTER TABLE foreign keys", ()
   assert.deepEqual(items.primaryKey, ["order_id", "product_id"]);
   assert.deepEqual(items.foreignKeys, [
     { columns: ["order_id"], refTable: "public.orders", refColumns: ["id"] },
-    { columns: ["product_id"], refTable: "public.products", refColumns: ["id"] },
+    {
+      columns: ["product_id"],
+      refTable: "public.products",
+      refColumns: ["id"],
+    },
   ]);
 });
 
@@ -260,15 +268,23 @@ test("mysql end-to-end: generates coherent, constraint-valid rows", () => {
     "mysql",
   );
   const { order, cyclic } = topoSort(s);
-  const data = buildData(s, order, cyclic, { rows: { users: 5, orders: 20 }, seed: 7 });
+  const data = buildData(s, order, cyclic, {
+    rows: { users: 5, orders: 20 },
+    seed: 7,
+  });
 
-  const userIds = new Set(data.find((d) => d.table.key === "public.users")!.rows.map((r) => r.id));
+  const userIds = new Set(
+    data.find((d) => d.table.key === "public.users")!.rows.map((r) => r.id),
+  );
   assert.equal(userIds.size, 5);
   const orders = data.find((d) => d.table.key === "public.orders")!.rows;
   assert.equal(orders.length, 20);
   for (const o of orders) {
     assert.ok(userIds.has(o.user_id), "FK points at a real user");
-    assert.ok(["pending", "paid", "shipped"].includes(o.status as string), "enum in range");
+    assert.ok(
+      ["pending", "paid", "shipped"].includes(o.status as string),
+      "enum in range",
+    );
     assert.ok((o.total as number) >= 0, "CHECK bound honored");
   }
 });
@@ -290,15 +306,23 @@ test("sqlite end-to-end: generates coherent, constraint-valid rows", () => {
     "sqlite",
   );
   const { order, cyclic } = topoSort(s);
-  const data = buildData(s, order, cyclic, { rows: { users: 4, posts: 10 }, seed: 3 });
+  const data = buildData(s, order, cyclic, {
+    rows: { users: 4, posts: 10 },
+    seed: 3,
+  });
 
-  const userIds = new Set(data.find((d) => d.table.key === "main.users")!.rows.map((r) => r.id));
+  const userIds = new Set(
+    data.find((d) => d.table.key === "main.users")!.rows.map((r) => r.id),
+  );
   assert.equal(userIds.size, 4);
   const posts = data.find((d) => d.table.key === "main.posts")!.rows;
   for (const p of posts) {
     assert.ok(userIds.has(p.author_id), "FK points at a real user");
   }
   for (const u of data.find((d) => d.table.key === "main.users")!.rows) {
-    assert.ok(["active", "banned"].includes(u.status as string), "enum idiom honored");
+    assert.ok(
+      ["active", "banned"].includes(u.status as string),
+      "enum idiom honored",
+    );
   }
 });

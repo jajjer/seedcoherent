@@ -24,8 +24,16 @@ if (!Number.isFinite(scale) || scale <= 0) {
   process.exit(1);
 }
 
-const base = { users: 100_000, products: 20_000, orders: 500_000, order_items: 500_000, categories: 500 };
-const rows = Object.fromEntries(Object.entries(base).map(([t, n]) => [t, Math.round(n * scale)]));
+const base = {
+  users: 100_000,
+  products: 20_000,
+  orders: 500_000,
+  order_items: 500_000,
+  categories: 500,
+};
+const rows = Object.fromEntries(
+  Object.entries(base).map(([t, n]) => [t, Math.round(n * scale)]),
+);
 const totalPlanned = Object.values(rows).reduce((a, b) => a + b, 0);
 
 const dir = mkdtempSync(join(tmpdir(), "seedcoherent-bench-"));
@@ -57,5 +65,7 @@ try {
 }
 
 function readSchema() {
-  return execFileSync("cat", [join(root, "examples/demo-sqlite.sql")], { encoding: "utf8" });
+  return execFileSync("cat", [join(root, "examples/demo-sqlite.sql")], {
+    encoding: "utf8",
+  });
 }
