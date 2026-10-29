@@ -406,7 +406,9 @@ program
             [
               "⚠ These key columns look like PII and will be copied UNCHANGED",
               "  (keys are preserved so joins stay valid):",
-              ...leaky.map((c) => `      ${c.table}.${c.column} (${c.category})`),
+              ...leaky.map(
+                (c) => `      ${c.table}.${c.column} (${c.category})`,
+              ),
               "  To scrub them consistently across every join, add:",
               `      --anonymize ${leaky.map((c) => `${c.table}.${c.column}`).join(" ")}`,
             ].join("\n"),
