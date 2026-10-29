@@ -32,9 +32,16 @@ export interface RowFetcher {
   /**
    * Seed rows: up to `limit` from a root table, in a stable order. An optional
    * raw-SQL `where` predicate (operator-trusted, from `--where`) filters which
-   * root rows are selected before the ORDER BY … LIMIT.
+   * root rows are selected before the ORDER BY … LIMIT. When `sample` is set
+   * (from `--sample`), the stable primary-key order is replaced by a random
+   * order, so the `limit` rows are a random sample rather than the first N.
    */
-  fetchRoots(table: TableInfo, limit: number, where?: string): Promise<Row[]>;
+  fetchRoots(
+    table: TableInfo,
+    limit: number,
+    where?: string,
+    sample?: boolean,
+  ): Promise<Row[]>;
   /** Rows whose `columns` tuple matches one of `keys` — for pulling parents. */
   fetchByKeys(
     table: TableInfo,
@@ -62,11 +69,14 @@ export class PgRowFetcher implements RowFetcher {
     table: TableInfo,
     limit: number,
     where?: string,
+    sample?: boolean,
   ): Promise<Row[]> {
     const filter = where ? ` WHERE ${where}` : "";
-    const order = table.primaryKey.length
-      ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
-      : "";
+    const order = sample
+      ? " ORDER BY random()"
+      : table.primaryKey.length
+        ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
+        : "";
     const res = await this.client.query(
       `SELECT * FROM ${qual(table)}${filter}${order} LIMIT $1`,
       [limit],
@@ -157,6 +167,7 @@ export async function collectSubset(
   roots: Record<string, number>,
   fetcher: RowFetcher,
   wheres: Record<string, string> = {},
+  sample = false,
 ): Promise<Map<string, Row[]>> {
   const selected = new Map<string, Map<string, Row>>();
   const pending: Array<{ table: TableInfo; rows: Row[] }> = [];
@@ -178,7 +189,7 @@ export async function collectSubset(
   for (const [spec, limit] of Object.entries(roots)) {
     const table = resolveTable(schema, spec);
     if (!table) throw new Error(`--subset: unknown table "${spec}"`);
-    add(table, await fetcher.fetchRoots(table, limit, wheres[spec]));
+    add(table, await fetcher.fetchRoots(table, limit, wheres[spec], sample));
   }
 
   // Upward closure: for each newly added row, ensure its FK parents exist.
