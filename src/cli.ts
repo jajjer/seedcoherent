@@ -119,7 +119,7 @@ program
   )
   .option(
     "--dialect <name>",
-    "engine for --schema-file: parses that DDL grammar and emits that SQL flavor — postgres (default), mysql, or sqlite",
+    "engine for --schema-file: parses that DDL grammar and emits that SQL flavor — postgres (default), mysql, sqlite, or sqlserver",
   )
   .option(
     "--schema-dialect <name>",
@@ -536,16 +536,16 @@ async function runOffline(
   // into another's seed SQL (e.g. read Postgres DDL, emit MySQL).
   const outputDialect: DialectName = (opts.dialect ??
     "postgres") as DialectName;
-  if (!["postgres", "mysql", "sqlite"].includes(outputDialect)) {
+  if (!["postgres", "mysql", "sqlite", "sqlserver"].includes(outputDialect)) {
     program.error(
-      `Unknown --dialect '${opts.dialect}'. Use postgres, mysql, or sqlite.`,
+      `Unknown --dialect '${opts.dialect}'. Use postgres, mysql, sqlite, or sqlserver.`,
     );
   }
   const schemaDialect: DialectName = (opts.schemaDialect ??
     outputDialect) as DialectName;
-  if (!["postgres", "mysql", "sqlite"].includes(schemaDialect)) {
+  if (!["postgres", "mysql", "sqlite", "sqlserver"].includes(schemaDialect)) {
     program.error(
-      `Unknown --schema-dialect '${opts.schemaDialect}'. Use postgres, mysql, or sqlite.`,
+      `Unknown --schema-dialect '${opts.schemaDialect}'. Use postgres, mysql, sqlite, or sqlserver.`,
     );
   }
   const dialect = dialectByName(outputDialect);
