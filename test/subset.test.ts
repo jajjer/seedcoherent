@@ -716,3 +716,96 @@ test("privateKeyColumns excludes keys opted into --anonymize", () => {
   });
   assert.deepEqual(leaky, []);
 });
+
+test("--children pulls child rows referencing collected rows (downward traversal)", async () => {
+  const s = shopSchema();
+  const sel = await collectSubset(
+    s,
+    { orders: 100 },
+    new FakeFetcher(shopData()),
+    {},
+    false,
+    true, // children
+  );
+  // Seeding all 3 orders → downward traversal pulls all 3 order_items.
+  assert.equal(byKey(sel, "public.order_items").length, 3);
+  // And those items' FK parents (products) are pulled via normal upward closure.
+  assert.equal(byKey(sel, "public.products").length, 3);
+  // All orders and their users are still present.
+  assert.equal(byKey(sel, "public.orders").length, 3);
+  assert.equal(byKey(sel, "public.users").length, 2);
+});
+
+test("--children scopes downward pull to the collected root set (two-table schema)", async () => {
+  // warehouses (no FK parents) <- products (FK to warehouses).
+  // Seeding 1 warehouse with --children pulls only that warehouse's products.
+  const warehouses = table("warehouses", {
+    columns: [idCol()],
+    primaryKey: ["id"],
+  });
+  const products = table("products", {
+    columns: [idCol(), col("warehouse_id", { udtName: "int4" })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["warehouse_id"], "warehouses", ["id"])],
+  });
+  const s = schema(warehouses, products);
+  const sel = await collectSubset(
+    s,
+    { warehouses: 1 },
+    new FakeFetcher({
+      warehouses: [{ id: 1 }, { id: 2 }],
+      products: [
+        { id: 10, warehouse_id: 1 },
+        { id: 11, warehouse_id: 1 },
+        { id: 20, warehouse_id: 2 },
+      ],
+    }),
+    {},
+    false,
+    true, // children
+  );
+  // Warehouse 1's products only; warehouse 2's product is not pulled.
+  const productIds = byKey(sel, "public.products")
+    .map((r) => r.id)
+    .sort();
+  assert.deepEqual(productIds, [10, 11]);
+  assert.equal(byKey(sel, "public.warehouses").length, 1);
+});
+
+test("--children without the flag does not pull child rows (existing behaviour)", async () => {
+  const s = shopSchema();
+  const sel = await collectSubset(
+    s,
+    { orders: 100 },
+    new FakeFetcher(shopData()),
+  );
+  // No children flag → order_items are not pulled when seeding orders.
+  assert.equal(byKey(sel, "public.order_items").length, 0);
+});
+
+test("--children BFS terminates even when child row references an already-collected parent", async () => {
+  // orders ← order_items → orders (self-loop via a parent_order_id column).
+  const orders = table("orders", {
+    columns: [
+      idCol(),
+      col("parent_order_id", { udtName: "int4", nullable: true }),
+    ],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["parent_order_id"], "orders", ["id"])],
+  });
+  const s = schema(orders);
+  const fetcher = new FakeFetcher({
+    orders: [
+      { id: 1, parent_order_id: null },
+      { id: 2, parent_order_id: 1 },
+    ],
+  });
+  // Should not loop forever — add() deduplicates, so BFS reaches a fixpoint.
+  const sel = await collectSubset(s, { orders: 1 }, fetcher, {}, false, true);
+  // Seeding order 1; its child order 2 is pulled via downward traversal; order
+  // 2's FK parent (order 1) is already collected so it's not re-enqueued.
+  const ids = byKey(sel, "public.orders")
+    .map((r) => r.id)
+    .sort();
+  assert.deepEqual(ids, [1, 2]);
+});
