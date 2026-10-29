@@ -168,6 +168,10 @@ program
     "subset: scrub these columns to the SAME fake (denormalized copies), e.g. users.email=orders.customer_email",
     [],
   )
+  .option(
+    "--secret <key>",
+    "subset: HMAC key for deterministic anonymization — same secret produces same fakes across runs",
+  )
   .action(async (connection, opts) => {
     const offline = !!opts.schemaFile;
     const connStr = connection ?? process.env.DATABASE_URL;
@@ -202,6 +206,7 @@ program
       anonymize: [...(fileConfig.anonymize ?? []), ...opts.anonymize],
       preserve: [...(fileConfig.preserve ?? []), ...opts.preserve],
       link: [...(fileConfig.link ?? []), ...parseLinkGroups(opts.link)],
+      secret: opts.secret ?? fileConfig.secret,
     };
 
     // Validate the temporal window and locale up front so a bad --since/--until

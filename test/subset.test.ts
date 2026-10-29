@@ -493,3 +493,46 @@ test("anonymization is consistent per value and deterministic per seed", async (
   // Same seed → identical output across runs.
   assert.deepEqual(names(a), names(b));
 });
+
+test("--secret produces identical fakes across runs for the same original value", async () => {
+  const s = shopSchema();
+  const { order } = topoSort(s);
+  const data = {
+    users: [
+      { id: 1, email: "a@x.com", first_name: "Ann" },
+      { id: 2, email: "b@x.com", first_name: "Ann" },
+    ],
+  };
+  const sel = await collectSubset(s, { users: 10 }, new FakeFetcher(data));
+
+  const run1 = anonymizeAll(s, order, sel, { secret: "test-secret" });
+  const run2 = anonymizeAll(s, order, sel, { secret: "test-secret" });
+
+  const names = (d: typeof run1) =>
+    d.find((x) => x.table.key === "public.users")!.rows.map((r) => r.first_name);
+
+  // Same original → same fake within a run.
+  const [r1n1, r1n2] = names(run1);
+  assert.equal(r1n1, r1n2, "same original value maps to same fake within a run");
+
+  // Same secret → same fakes across runs.
+  assert.deepEqual(names(run1), names(run2), "--secret makes output deterministic across runs");
+});
+
+test("--secret with different key produces different fakes", async () => {
+  const s = shopSchema();
+  const { order } = topoSort(s);
+  const data = {
+    users: [{ id: 1, email: "a@x.com", first_name: "Ann" }],
+  };
+  const sel = await collectSubset(s, { users: 10 }, new FakeFetcher(data));
+
+  const run1 = anonymizeAll(s, order, sel, { secret: "secret-A" });
+  const run2 = anonymizeAll(s, order, sel, { secret: "secret-B" });
+
+  const name = (d: typeof run1) =>
+    d.find((x) => x.table.key === "public.users")!.rows[0].first_name;
+
+  // Different secrets almost certainly produce different output (collision probability ~1/vocab size).
+  assert.notEqual(name(run1), name(run2), "different secrets produce different fakes");
+});

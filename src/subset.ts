@@ -14,6 +14,7 @@
  *      the join graph is byte-identical and referential integrity is guaranteed.
  */
 
+import { createHmac } from "node:crypto";
 import { Faker } from "@faker-js/faker";
 import { parseChecks } from "./checks.js";
 import type { Row, TableData } from "./generate.js";
@@ -394,6 +395,9 @@ export function anonymizeAll(
     faker.seed(config.seed);
     faker.setDefaultRefDate("2025-01-01T00:00:00.000Z");
   }
+  const hmacFaker = config.secret
+    ? new Faker({ locale: resolveLocale(config.locale).main })
+    : undefined;
 
   const protectedBy = protectedColumns(schema);
   const isPreserved = columnMatcher(config.preserve);
@@ -523,6 +527,8 @@ export function anonymizeAll(
             p.group.gen,
             row[col.name],
             p.group.cache,
+            config.secret,
+            hmacFaker,
             p.group.used,
           );
         } else {
@@ -531,6 +537,8 @@ export function anonymizeAll(
             p.gen!,
             row[col.name],
             p.cache!,
+            config.secret,
+            hmacFaker,
             p.used,
           );
         }
@@ -551,16 +559,27 @@ function anonValue(
   gen: Generator,
   original: unknown,
   cache: Map<string, unknown>,
+  secret?: string,
+  hmacFaker?: Faker,
   used?: Set<string>,
 ): unknown {
   if (original === null || original === undefined) return original; // keep the hole
   const key = serialize(original);
   if (cache.has(key)) return cache.get(key);
 
-  let value = gen(faker);
+  let callFaker = faker;
+  if (secret !== undefined && hmacFaker !== undefined) {
+    // Seed a dedicated Faker from HMAC(secret, original) so the same secret
+    // always produces the same fake for the same real value, across runs.
+    const digest = createHmac("sha256", secret).update(key).digest();
+    hmacFaker.seed(digest.readUInt32BE(0));
+    callFaker = hmacFaker;
+  }
+
+  let value = gen(callFaker);
   if (used) {
     for (let i = 0; i < UNIQUE_RETRIES && used.has(serialize(value)); i++)
-      value = gen(faker);
+      value = gen(callFaker);
     used.add(serialize(value));
   }
   cache.set(key, value);
