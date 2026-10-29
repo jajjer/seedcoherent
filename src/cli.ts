@@ -40,7 +40,13 @@ import {
   buildSubsetPlan,
   formatPlan,
 } from "./plan.js";
-import { anonymizeAll, collectSubset, privateKeyColumns } from "./subset.js";
+import {
+  anonymizeAll,
+  collectSubset,
+  formatScanReport,
+  privateKeyColumns,
+  scanSubset,
+} from "./subset.js";
 import { buildProfile, formatProfileSummary, mergeProfile } from "./profile.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
@@ -171,6 +177,14 @@ program
   .option(
     "--secret <key>",
     "subset: HMAC key for deterministic anonymization — same secret produces same fakes across runs",
+  )
+  .option(
+    "--scan",
+    "subset: print a per-column privacy report (PII class + scrub/keep/key action) and exit without copying any data",
+  )
+  .option(
+    "--json",
+    "with --scan: emit the privacy report as JSON instead of a table",
   )
   .action(async (connection, opts) => {
     const offline = !!opts.schemaFile;
@@ -311,6 +325,14 @@ program
           "--append adds rows to existing data; --truncate would delete it first.",
         );
       }
+      if (opts.scan && !isSubset) {
+        program.error(
+          "--scan reports what --subset would do; pass --subset <spec...> too.",
+        );
+      }
+      if (opts.json && !opts.scan) {
+        program.error("--json only applies to --scan.");
+      }
 
       // Profiling learns the shape of the existing data and folds it into the
       // config *beneath* the user's explicit flags. --profile-out dumps that
@@ -396,6 +418,20 @@ program
 
       const batchSize: number | undefined = config.batchSize;
       const verb = isSubset ? "Subset" : isAppend ? "Appended" : "Generated";
+
+      // --scan: a schema-level privacy report. Introspection already ran (the
+      // only source access scan needs); classify every column and exit without
+      // reading rows or writing anywhere. The report itself flags PII copied
+      // verbatim, so the separate warning below is redundant here.
+      if (opts.scan) {
+        const report = scanSubset(schema, config);
+        process.stdout.write(
+          (opts.json
+            ? JSON.stringify(report, null, 2)
+            : formatScanReport(report)) + "\n",
+        );
+        return;
+      }
 
       // Warn (don't block) when a preserved join key is itself PII: keys are
       // copied verbatim to keep joins valid, so its real values would leak.

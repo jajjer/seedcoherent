@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] — 2026-10-28
+
+### Added
+
+- **`--scan`: a pre-copy privacy report.** Before copying any data, `--scan` introspects the schema and prints one row per column — its PII classification (`classifyColumn`, `src/pii.ts`) and the action `--subset` would take: `scrub` (faked), `keep` (passed through via `--preserve`), or `key` (passed through because it's a PK/FK/FK-referenced column). It reads **no source rows and writes nothing** — so it needs no `--to`/`--out` — and reflects your `--anonymize`/`--preserve`/`--link` flags. Rows where PII would be copied verbatim are marked `⚠`, with a summary footer, for security-team sign-off. `--subset` is required (scan is subset-mode; row counts are ignored); `--json` emits the report as JSON instead of a table. The keep-vs-scrub decision is now a single shared helper (`columnDecision`) that both `anonymizeAll` and the new exported `scanSubset(schema, config)` / `formatScanReport(rows)` consume, so the report can't drift from the copy. (Roadmap item 4.)
+
 ## [0.25.0] — 2026-10-28
 
 ### Added

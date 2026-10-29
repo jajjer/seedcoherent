@@ -20,7 +20,11 @@ import { parseChecks } from "./checks.js";
 import type { Row, TableData } from "./generate.js";
 import { inferGenerator, type Generator } from "./infer.js";
 import { resolveLocale } from "./locale.js";
-import { classifyColumn, type PiiCategory } from "./pii.js";
+import {
+  classifyColumn,
+  type PiiCategory,
+  type PiiSensitivity,
+} from "./pii.js";
 import type { Config, Connection, Schema, TableInfo } from "./types.js";
 
 /** Abstracts the SELECT queries so the closure logic is testable off-DB. */
@@ -420,29 +424,30 @@ interface GroupState {
   used: Set<string>;
 }
 
-/**
- * Replace values with anonymized ones. By default only non-key columns are
- * scrubbed — join keys pass through verbatim so referential integrity holds.
- * `config.anonymize` opts specific join keys into scrubbing (remapped
- * consistently across the whole group), and `config.preserve` opts specific
- * non-key columns out. Same original → same fake within a column/group
- * (consistency), unique columns stay unique, and NULLs are preserved.
- */
-export function anonymizeAll(
-  schema: Schema,
-  order: TableInfo[],
-  selected: Map<string, Row[]>,
-  config: Config,
-): TableData[] {
-  const faker = new Faker({ locale: resolveLocale(config.locale).main });
-  if (config.seed !== undefined) {
-    faker.seed(config.seed);
-    faker.setDefaultRefDate("2025-01-01T00:00:00.000Z");
-  }
-  const hmacFaker = config.secret
-    ? new Faker({ locale: resolveLocale(config.locale).main })
-    : undefined;
+/** What `--subset` would do to a column's values on copy. */
+export type ColumnAction =
+  | "scrub" // replaced with a fake value
+  | "keep" // passed through verbatim because `--preserve` opted it out
+  | "key"; // passed through verbatim to keep joins valid (PK/FK/referenced)
 
+/**
+ * Precomputed, config-dependent state that `columnDecision` reads. Built once by
+ * `buildActionContext` and shared by both `anonymizeAll` (to drive scrubbing) and
+ * `scanSubset` (to report), so the two can never disagree about a column's fate.
+ */
+interface ActionContext {
+  protectedBy: Map<string, Set<string>>;
+  isPreserved: (table: TableInfo, col: string) => boolean;
+  isForced: (table: TableInfo, col: string) => boolean;
+  groupOf: Map<string, string>;
+  members: Map<string, string[]>;
+  referenced: Set<string>;
+  forcedGroups: Set<string>;
+  linkGroupOf: Map<string, string>;
+  linkMembers: Map<string, string[]>;
+}
+
+function buildActionContext(schema: Schema, config: Config): ActionContext {
   const protectedBy = protectedColumns(schema);
   const isPreserved = columnMatcher(config.preserve);
   const isForced = columnMatcher(config.anonymize);
@@ -467,6 +472,165 @@ export function anonymizeAll(
       }
     }
   }
+
+  return {
+    protectedBy,
+    isPreserved,
+    isForced,
+    groupOf,
+    members,
+    referenced,
+    forcedGroups,
+    linkGroupOf,
+    linkMembers,
+  };
+}
+
+/** The action to take for one column, plus (for scrubs) which shared state drives it. */
+type ColumnDecision =
+  | { action: "key" }
+  | { action: "keep" }
+  | { action: "scrub"; via: "group" | "link"; root: string }
+  | { action: "scrub"; via: "local" };
+
+/**
+ * Decide a single column's fate. The branch order mirrors `anonymizeAll`'s loop
+ * exactly — this is the extracted body of that loop — so `scanSubset` reports the
+ * same outcome the copy would produce.
+ */
+function columnDecision(
+  ctx: ActionContext,
+  table: TableInfo,
+  col: string,
+): ColumnDecision {
+  const member = memberId(table.key, col);
+  const root = ctx.groupOf.get(member);
+  const joinKey = root !== undefined && ctx.members.get(root)!.length >= 2;
+
+  if (joinKey) {
+    // A join key moves only when its whole group is forced.
+    if (ctx.forcedGroups.has(root!))
+      return { action: "scrub", via: "group", root: root! };
+    return { action: "key" };
+  }
+  if (ctx.isPreserved(table, col)) return { action: "keep" };
+  // Non-key columns scrub by default; protected-but-ungrouped keys only when forced.
+  const keep = ctx.protectedBy.get(table.key);
+  if (keep?.has(col) && !ctx.isForced(table, col)) return { action: "key" };
+  // A --link member shares one mapping across its whole group.
+  const linkRoot = ctx.linkGroupOf.get(member);
+  if (linkRoot !== undefined)
+    return { action: "scrub", via: "link", root: linkRoot };
+  return { action: "scrub", via: "local" };
+}
+
+/** One row of the `--scan` privacy report: a column, its PII class, and its fate. */
+export interface ScanColumn {
+  /** Qualified `schema.table` key. */
+  table: string;
+  column: string;
+  /** Postgres base type (udtName) for operator context. */
+  type: string;
+  category: PiiCategory | null;
+  sensitivity: PiiSensitivity | null;
+  action: ColumnAction;
+}
+
+/**
+ * Classify every emitted column of every table and report the action `--subset`
+ * would take — without reading a single source row. Pure and DB-free: it needs
+ * only the introspected schema and the anonymization config. Rows where PII is
+ * copied verbatim (`action !== "scrub"` with a non-null `category`) are the ones
+ * a security reviewer should scrutinize. Sorted stably by table then column.
+ */
+export function scanSubset(schema: Schema, config: Config): ScanColumn[] {
+  const ctx = buildActionContext(schema, config);
+  const out: ScanColumn[] = [];
+  for (const table of schema.tables.values()) {
+    for (const col of table.columns) {
+      if (col.isGenerated) continue; // never emitted, so never copied
+      const pii = classifyColumn(table, col);
+      out.push({
+        table: table.key,
+        column: col.name,
+        type: col.udtName,
+        category: pii?.category ?? null,
+        sensitivity: pii?.sensitivity ?? null,
+        action: columnDecision(ctx, table, col.name).action,
+      });
+    }
+  }
+  out.sort((a, b) =>
+    a.table === b.table
+      ? a.column.localeCompare(b.column)
+      : a.table.localeCompare(b.table),
+  );
+  return out;
+}
+
+/** Columns a reviewer must scrutinize: PII that is copied to the target unchanged. */
+const leaksVerbatim = (r: ScanColumn) =>
+  r.category !== null && r.action !== "scrub";
+
+/**
+ * Render a `--scan` report as an aligned human-readable table. A `⚠` marks each
+ * row where PII would be copied verbatim; a footer summarizes the counts.
+ */
+export function formatScanReport(rows: ScanColumn[]): string {
+  const colName = (r: ScanColumn) => `${r.table}.${r.column}`;
+  const pii = (r: ScanColumn) =>
+    r.category ? `${r.category} (${r.sensitivity})` : "—";
+
+  const nameW = Math.max(6, ...rows.map((r) => colName(r).length));
+  const typeW = Math.max(4, ...rows.map((r) => r.type.length));
+  const piiW = Math.max(3, ...rows.map((r) => pii(r).length));
+
+  const out: string[] = [];
+  out.push(
+    `  ${"".padEnd(1)} ${"COLUMN".padEnd(nameW)}  ${"TYPE".padEnd(typeW)}  ${"PII".padEnd(piiW)}  ACTION`,
+  );
+  for (const r of rows) {
+    const mark = leaksVerbatim(r) ? "⚠" : " ";
+    out.push(
+      `  ${mark} ${colName(r).padEnd(nameW)}  ${r.type.padEnd(typeW)}  ${pii(r).padEnd(piiW)}  ${r.action}`,
+    );
+  }
+
+  const piiCount = rows.filter((r) => r.category !== null).length;
+  const leakCount = rows.filter(leaksVerbatim).length;
+  out.push("");
+  out.push(
+    `  ${rows.length} columns · ${piiCount} PII · ${leakCount} PII copied verbatim` +
+      (leakCount > 0 ? " ⚠" : ""),
+  );
+  return out.join("\n");
+}
+
+/**
+ * Replace values with anonymized ones. By default only non-key columns are
+ * scrubbed — join keys pass through verbatim so referential integrity holds.
+ * `config.anonymize` opts specific join keys into scrubbing (remapped
+ * consistently across the whole group), and `config.preserve` opts specific
+ * non-key columns out. Same original → same fake within a column/group
+ * (consistency), unique columns stay unique, and NULLs are preserved.
+ */
+export function anonymizeAll(
+  schema: Schema,
+  order: TableInfo[],
+  selected: Map<string, Row[]>,
+  config: Config,
+): TableData[] {
+  const faker = new Faker({ locale: resolveLocale(config.locale).main });
+  if (config.seed !== undefined) {
+    faker.seed(config.seed);
+    faker.setDefaultRefDate("2025-01-01T00:00:00.000Z");
+  }
+  const hmacFaker = config.secret
+    ? new Faker({ locale: resolveLocale(config.locale).main })
+    : undefined;
+
+  const ctx = buildActionContext(schema, config);
+  const { members, referenced, linkMembers } = ctx;
 
   // Build shared state lazily, once per forced group, keyed by group root.
   const groupState = new Map<string, GroupState>();
@@ -513,7 +677,6 @@ export function anonymizeAll(
     const rows = selected.get(table.key);
     if (!rows || rows.length === 0) continue;
 
-    const keep = protectedBy.get(table.key) ?? new Set<string>();
     const emitCols = table.columns.filter((c) => !c.isGenerated);
     const checks = parseChecks(table.checks);
 
@@ -533,23 +696,16 @@ export function anonymizeAll(
       }
     >();
     for (const col of emitCols) {
-      const member = memberId(table.key, col.name);
-      const root = groupOf.get(member);
-      const joinKey = root !== undefined && members.get(root)!.length >= 2;
-
-      if (joinKey) {
-        // A join key moves only when its whole group is forced.
-        if (forcedGroups.has(root!))
-          plan.set(col.name, { group: stateForGroup(root!) });
+      // One source of truth for keep-vs-scrub lives in columnDecision, shared
+      // with scanSubset so the --scan report can't drift from what runs here.
+      const d = columnDecision(ctx, table, col.name);
+      if (d.action !== "scrub") continue; // key / preserved → pass through
+      if (d.via === "group") {
+        plan.set(col.name, { group: stateForGroup(d.root) });
         continue;
       }
-      if (isPreserved(table, col.name)) continue;
-      // Non-key columns scrub by default; protected-but-ungrouped keys only when forced.
-      if (keep.has(col.name) && !isForced(table, col.name)) continue;
-      // A --link member shares one mapping across its whole group.
-      const linkRoot = linkGroupOf.get(member);
-      if (linkRoot !== undefined) {
-        plan.set(col.name, { group: stateForLink(linkRoot) });
+      if (d.via === "link") {
+        plan.set(col.name, { group: stateForLink(d.root) });
         continue;
       }
       plan.set(col.name, {
