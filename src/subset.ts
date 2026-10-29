@@ -20,6 +20,7 @@ import { parseChecks } from "./checks.js";
 import type { Row, TableData } from "./generate.js";
 import { inferGenerator, type Generator } from "./infer.js";
 import { resolveLocale } from "./locale.js";
+import { classifyColumn, type PiiCategory } from "./pii.js";
 import type { Config, Connection, Schema, TableInfo } from "./types.js";
 
 /** Abstracts the SELECT queries so the closure logic is testable off-DB. */
@@ -213,6 +214,49 @@ function protectedColumns(schema: Schema): Map<string, Set<string>> {
     }
   }
   return map;
+}
+
+/** A preserved key column whose values read as PII and so leak into the target. */
+export interface PrivateKeyColumn {
+  /** Qualified `schema.table` key. */
+  table: string;
+  column: string;
+  category: PiiCategory;
+}
+
+/**
+ * Key columns that `--subset` would copy to the target **verbatim** (PKs, FK
+ * columns, and FK-referenced columns are preserved so joins stay valid) but that
+ * `classifyColumn` flags as PII — the classic case being an email used as a
+ * primary key. Columns the user already opted into scrubbing via
+ * `config.anonymize` are excluded, since a forced join group is remapped
+ * consistently and no longer leaks. Returned stable-sorted for deterministic
+ * output. Callers warn on a non-empty result.
+ */
+export function privateKeyColumns(
+  schema: Schema,
+  config: Config,
+): PrivateKeyColumn[] {
+  const protectedBy = protectedColumns(schema);
+  const isForced = columnMatcher(config.anonymize);
+  const out: PrivateKeyColumn[] = [];
+  for (const table of schema.tables.values()) {
+    const keep = protectedBy.get(table.key);
+    if (!keep || keep.size === 0) continue;
+    for (const col of table.columns) {
+      if (!keep.has(col.name)) continue;
+      if (isForced(table, col.name)) continue; // opted into scrubbing
+      const pii = classifyColumn(table, col);
+      if (!pii) continue;
+      out.push({ table: table.key, column: col.name, category: pii.category });
+    }
+  }
+  out.sort((a, b) =>
+    a.table === b.table
+      ? a.column.localeCompare(b.column)
+      : a.table.localeCompare(b.table),
+  );
+  return out;
 }
 
 /** Compile "table.column" / "schema.table.column" / bare "column" patterns into a matcher. */

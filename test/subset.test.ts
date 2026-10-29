@@ -4,7 +4,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { topoSort } from "../src/graph.js";
 import type { Row } from "../src/generate.js";
-import { anonymizeAll, collectSubset, type RowFetcher } from "../src/subset.js";
+import {
+  anonymizeAll,
+  collectSubset,
+  privateKeyColumns,
+  type RowFetcher,
+} from "../src/subset.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
 import type { Schema, TableInfo } from "../src/types.js";
 
@@ -509,14 +514,24 @@ test("--secret produces identical fakes across runs for the same original value"
   const run2 = anonymizeAll(s, order, sel, { secret: "test-secret" });
 
   const names = (d: typeof run1) =>
-    d.find((x) => x.table.key === "public.users")!.rows.map((r) => r.first_name);
+    d
+      .find((x) => x.table.key === "public.users")!
+      .rows.map((r) => r.first_name);
 
   // Same original → same fake within a run.
   const [r1n1, r1n2] = names(run1);
-  assert.equal(r1n1, r1n2, "same original value maps to same fake within a run");
+  assert.equal(
+    r1n1,
+    r1n2,
+    "same original value maps to same fake within a run",
+  );
 
   // Same secret → same fakes across runs.
-  assert.deepEqual(names(run1), names(run2), "--secret makes output deterministic across runs");
+  assert.deepEqual(
+    names(run1),
+    names(run2),
+    "--secret makes output deterministic across runs",
+  );
 });
 
 test("--secret with different key produces different fakes", async () => {
@@ -534,7 +549,11 @@ test("--secret with different key produces different fakes", async () => {
     d.find((x) => x.table.key === "public.users")!.rows[0].first_name;
 
   // Different secrets almost certainly produce different output (collision probability ~1/vocab size).
-  assert.notEqual(name(run1), name(run2), "different secrets produce different fakes");
+  assert.notEqual(
+    name(run1),
+    name(run2),
+    "different secrets produce different fakes",
+  );
 });
 
 test("anonymize scrubs a PII ssn column to a differently-shaped fake", async () => {
@@ -560,4 +579,43 @@ test("anonymize scrubs a PII ssn column to a differently-shaped fake", async () 
   }
   assert.notEqual(rows[0].ssn, "111-22-3333", "original ssn is replaced");
   assert.notEqual(rows[1].ssn, "444-55-6666", "original ssn is replaced");
+});
+
+// A schema whose users table is keyed by email (a PII primary key referenced by
+// an FK), alongside a plainly non-PII numeric-keyed table.
+function emailKeySchema(): Schema {
+  const users = table("users", {
+    columns: [col("email", { udtName: "text" }), col("first_name")],
+    primaryKey: ["email"],
+  });
+  const orders = table("orders", {
+    columns: [idCol(), col("user_email", { udtName: "text" })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["user_email"], "users", ["email"])],
+  });
+  return schema(users, orders);
+}
+
+test("privateKeyColumns flags a PII primary key and its FK references", () => {
+  const s = emailKeySchema();
+  const leaky = privateKeyColumns(s, {});
+  // The PK email, the FK column, and the FK-referenced email are all preserved
+  // verbatim; all three read as PII.
+  assert.deepEqual(leaky, [
+    { table: "public.orders", column: "user_email", category: "email" },
+    { table: "public.users", column: "email", category: "email" },
+  ]);
+});
+
+test("privateKeyColumns ignores non-PII keys", () => {
+  const s = shopSchema(); // numeric PKs/FKs; email is a non-key unique
+  assert.deepEqual(privateKeyColumns(s, {}), []);
+});
+
+test("privateKeyColumns excludes keys opted into --anonymize", () => {
+  const s = emailKeySchema();
+  const leaky = privateKeyColumns(s, {
+    anonymize: ["users.email", "orders.user_email"],
+  });
+  assert.deepEqual(leaky, []);
 });
