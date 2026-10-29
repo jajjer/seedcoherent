@@ -272,4 +272,12 @@ export interface Config {
    * a key column is rejected. Same key forms as `anonymize`.
    */
   link?: string[][];
+  /**
+   * Subset+anonymize only: HMAC-SHA256 key for deterministic anonymization.
+   * When set, the same original value always produces the same fake (across
+   * runs) when the same secret is used. Without it, fakes are random per run.
+   * Treat this value like a password — anyone who knows it can reverse-map fakes
+   * back to originals via brute-force if the value space is small.
+   */
+  secret?: string;
 }
