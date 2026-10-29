@@ -7,17 +7,35 @@ import type { Row } from "../src/generate.js";
 import {
   anonymizeAll,
   collectSubset,
+  PgRowFetcher,
   privateKeyColumns,
   type RowFetcher,
 } from "../src/subset.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
-import type { Schema, TableInfo } from "../src/types.js";
+import type { Connection, Schema, TableInfo } from "../src/types.js";
 
-/** In-memory fetcher backed by fixed tables of rows, keyed by table name. */
+/**
+ * In-memory fetcher backed by fixed tables of rows, keyed by table name.
+ * A `where` predicate (raw SQL in production) is modeled here by a JS filter
+ * looked up by the exact predicate string via the optional `predicates` map.
+ */
 class FakeFetcher implements RowFetcher {
-  constructor(private data: Record<string, Row[]>) {}
-  async fetchRoots(t: TableInfo, limit: number): Promise<Row[]> {
-    return (this.data[t.name] ?? []).slice(0, limit);
+  constructor(
+    private data: Record<string, Row[]>,
+    private predicates: Record<string, (row: Row) => boolean> = {},
+  ) {}
+  async fetchRoots(
+    t: TableInfo,
+    limit: number,
+    where?: string,
+  ): Promise<Row[]> {
+    let rows = this.data[t.name] ?? [];
+    if (where) {
+      const pred = this.predicates[where];
+      if (!pred) throw new Error(`no fake predicate for "${where}"`);
+      rows = rows.filter(pred);
+    }
+    return rows.slice(0, limit);
   }
   async fetchByKeys(
     t: TableInfo,
@@ -166,6 +184,49 @@ test("root limit caps seed rows", async () => {
   const s = shopSchema();
   const sel = await collectSubset(s, { users: 2 }, new FakeFetcher(shopData()));
   assert.equal(byKey(sel, "public.users").length, 2);
+});
+
+test("--where filters root rows but FK parents are still pulled", async () => {
+  const s = shopSchema();
+  const sel = await collectSubset(
+    s,
+    { orders: 100 },
+    new FakeFetcher(shopData(), { "user_id = 1": (r) => r.user_id === 1 }),
+    { orders: "user_id = 1" },
+  );
+  // Only user 1's orders are seeded...
+  assert.deepEqual(
+    byKey(sel, "public.orders")
+      .map((r) => r.id)
+      .sort(),
+    [100, 102],
+  );
+  // ...and the FK closure still pulls the referenced parent (user 1), unfiltered.
+  assert.deepEqual(
+    byKey(sel, "public.users").map((r) => r.id),
+    [1],
+  );
+});
+
+test("PgRowFetcher.fetchRoots splices WHERE before ORDER BY/LIMIT", async () => {
+  const calls: { sql: string; params?: unknown[] }[] = [];
+  const client: Connection = {
+    async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return { rows: [] as T[] };
+    },
+    async end() {},
+  };
+  const users = table("users", {
+    columns: [idCol(), col("tenant_id", { udtName: "int4" })],
+    primaryKey: ["id"],
+  });
+  await new PgRowFetcher(client).fetchRoots(users, 25, "tenant_id = 42");
+  assert.equal(
+    calls[0].sql,
+    'SELECT * FROM "public"."users" WHERE tenant_id = 42 ORDER BY "id" LIMIT $1',
+  );
+  assert.deepEqual(calls[0].params, [25]);
 });
 
 async function anonymizeShop(seed = 7) {

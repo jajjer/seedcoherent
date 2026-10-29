@@ -14,14 +14,19 @@ const qual = (t: TableInfo) => `${ident(t.schema)}.${ident(t.name)}`;
 export class MssqlRowFetcher implements RowFetcher {
   constructor(private conn: Connection) {}
 
-  async fetchRoots(table: TableInfo, limit: number): Promise<Row[]> {
+  async fetchRoots(
+    table: TableInfo,
+    limit: number,
+    where?: string,
+  ): Promise<Row[]> {
     // SQL Server has no LIMIT — TOP (n) does the job (needs an ORDER BY to be
     // deterministic, which the primary key provides when present).
+    const filter = where ? ` WHERE ${where}` : "";
     const order = table.primaryKey.length
       ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
       : "";
     const res = await this.conn.query<Row>(
-      `SELECT TOP (@p1) * FROM ${qual(table)}${order}`,
+      `SELECT TOP (@p1) * FROM ${qual(table)}${filter}${order}`,
       [limit],
     );
     return res.rows;

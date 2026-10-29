@@ -34,6 +34,16 @@ test("fetchRoots orders by PK and binds the limit", async () => {
   assert.deepEqual(conn.calls[0].params, [25]);
 });
 
+test("fetchRoots splices a WHERE predicate before ORDER BY/LIMIT", async () => {
+  const conn = new RecordingConn();
+  await new MysqlRowFetcher(conn).fetchRoots(users, 25, "total > 100");
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT * FROM `app`.`users` WHERE total > 100 ORDER BY `id` LIMIT ?",
+  );
+  assert.deepEqual(conn.calls[0].params, [25]);
+});
+
 test("fetchByKeys uses IN (?) for a single-column key", async () => {
   const conn = new RecordingConn();
   await new MysqlRowFetcher(conn).fetchByKeys(users, ["id"], [[1], [2], [3]]);

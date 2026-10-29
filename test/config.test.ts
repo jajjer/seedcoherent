@@ -11,6 +11,7 @@ import {
   parseLinkGroups,
   parseNullRateSpecs,
   parseRowSpecs,
+  parseWhereSpecs,
   validateNullRates,
 } from "../src/config.js";
 
@@ -31,6 +32,25 @@ test("parseRowSpecs splits on the last '=' so schema-qualified names work", () =
 
 test("parseRowSpecs rejects specs without '='", () => {
   assert.throws(() => parseRowSpecs(["users"]), /expected table=count/);
+});
+
+test("parseWhereSpecs parses table=predicate pairs", () => {
+  assert.deepEqual(parseWhereSpecs(["orders=total > 100", "users=active"]), {
+    orders: "total > 100",
+    users: "active",
+  });
+});
+
+test("parseWhereSpecs splits on the first '=' so predicates may contain '='", () => {
+  assert.deepEqual(parseWhereSpecs(["users=tenant_id = 42"]), {
+    users: "tenant_id = 42",
+  });
+});
+
+test("parseWhereSpecs rejects specs without '=', empty table, or empty predicate", () => {
+  assert.throws(() => parseWhereSpecs(["orders"]), /expected table=predicate/);
+  assert.throws(() => parseWhereSpecs(["=total > 1"]), /empty table/);
+  assert.throws(() => parseWhereSpecs(["orders="]), /empty predicate/);
 });
 
 test("parseRowSpecs rejects non-numeric or negative counts", () => {
