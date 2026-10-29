@@ -4,6 +4,15 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] — 2026-10-28
+
+### Added
+
+- **PII detection module (`src/pii.ts`): `classifyColumn` and `piiGenerator`.**
+  A new source of truth for "is this column personal data?" — `classifyColumn(table, col)` returns `{ category, sensitivity }` (or `null`) from an ordered catalog of 17 PII categories keyed on column names, matching the same heuristic `infer.ts` uses for generation. Sensitivity tiers: **high** (SSN, tax_id, passport, drivers_license, national_id, bank_account, credit_card, password, date_of_birth), **medium** (email, phone, person_name, street_address, ip_address, iban, routing_number), **low** (geo). This lays the groundwork for a `--scan` pre-copy privacy report (roadmap item 4) and private-key warnings (item 3), both of which consume `classifyColumn`.
+- **Realistic anonymization for SSN, tax ID, passport, driver's license, national ID, bank account, and routing number columns.** These categories previously fell through to generic lorem-word fakes. `piiGenerator` now provides shape-preserving Faker generators (e.g. `###-##-####` for SSN, `##-#######` for EIN/TIN, 9-char alphanumeric for passports) that `infer.ts` hooks before its own name-rule table. The `--subset --anonymize` path (including `--secret` deterministic anonymization) picks these up automatically — no new flags required.
+- **Shared name-matching module (`src/match.ts`).** The column-name normalization and matching helpers (`norm`, `tokenize`, `ctxFor`, `has`, `tok`, `or`) previously private to `infer.ts` are now exported from a dedicated module so `pii.ts` and future modules share one implementation.
+
 ## [0.21.0] — 2026-09-18
 
 ### Added
