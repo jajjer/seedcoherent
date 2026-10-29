@@ -25,7 +25,13 @@ import {
   type PiiCategory,
   type PiiSensitivity,
 } from "./pii.js";
-import type { Config, Connection, Schema, TableInfo } from "./types.js";
+import type {
+  Config,
+  Connection,
+  ForeignKey,
+  Schema,
+  TableInfo,
+} from "./types.js";
 
 /** Abstracts the SELECT queries so the closure logic is testable off-DB. */
 export interface RowFetcher {
@@ -160,7 +166,9 @@ function rowId(table: TableInfo, row: Row): string {
 
 /**
  * Seed the root tables, then pull FK parents transitively until no new rows
- * appear. Returns rows per table key, deduplicated, ready to anonymize + emit.
+ * appear. When `children` is true, also traverse downward: for each collected
+ * row, pull child rows (in other tables) whose FK columns point at it.
+ * Returns rows per table key, deduplicated, ready to anonymize + emit.
  */
 export async function collectSubset(
   schema: Schema,
@@ -168,7 +176,23 @@ export async function collectSubset(
   fetcher: RowFetcher,
   wheres: Record<string, string> = {},
   sample = false,
+  children = false,
 ): Promise<Map<string, Row[]>> {
+  // Reverse FK index: parentTableKey -> [{childTable, fk}] for downward traversal.
+  const reverseIndex = new Map<
+    string,
+    Array<{ childTable: TableInfo; fk: ForeignKey }>
+  >();
+  if (children) {
+    for (const childTable of schema.tables.values()) {
+      for (const fk of childTable.foreignKeys) {
+        const list = reverseIndex.get(fk.refTable) ?? [];
+        list.push({ childTable, fk });
+        reverseIndex.set(fk.refTable, list);
+      }
+    }
+  }
+
   const selected = new Map<string, Map<string, Row>>();
   const pending: Array<{ table: TableInfo; rows: Row[] }> = [];
 
@@ -192,9 +216,11 @@ export async function collectSubset(
     add(table, await fetcher.fetchRoots(table, limit, wheres[spec], sample));
   }
 
-  // Upward closure: for each newly added row, ensure its FK parents exist.
+  // BFS closure: upward (FK parents) and optionally downward (FK children).
   while (pending.length > 0) {
     const { table, rows } = pending.shift()!;
+
+    // Upward: for each newly added row, ensure its FK parents exist.
     for (const fk of table.foreignKeys) {
       const parent = schema.tables.get(fk.refTable);
       if (!parent) continue;
@@ -209,6 +235,25 @@ export async function collectSubset(
         parent,
         await fetcher.fetchByKeys(parent, fk.refColumns, [...needed.values()]),
       );
+    }
+
+    // Downward: pull child rows that reference the collected rows (--children).
+    if (children) {
+      for (const { childTable, fk } of reverseIndex.get(table.key) ?? []) {
+        const needed = new Map<string, unknown[]>();
+        for (const row of rows) {
+          const tuple = fk.refColumns.map((c) => row[c]);
+          if (tuple.some((v) => v === null || v === undefined)) continue;
+          needed.set(tuple.map(serialize).join("\u0000"), tuple);
+        }
+        if (needed.size === 0) continue;
+        add(
+          childTable,
+          await fetcher.fetchByKeys(childTable, fk.columns, [
+            ...needed.values(),
+          ]),
+        );
+      }
     }
   }
 

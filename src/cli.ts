@@ -170,6 +170,10 @@ program
     "subset: pick root rows at random instead of the first N by primary key",
   )
   .option(
+    "--children",
+    "subset: also pull child rows that reference collected rows (downward FK traversal)",
+  )
+  .option(
     "--anonymize <col...>",
     "subset: also scrub these join keys, e.g. accounts.email (remaps the whole join)",
     [],
@@ -348,6 +352,11 @@ program
           "--sample selects random --subset root rows; pass --subset <spec...> too.",
         );
       }
+      if (opts.children && !isSubset) {
+        program.error(
+          "--children pulls child rows referencing the subset; pass --subset <spec...> too.",
+        );
+      }
       const wheres = parseWhereSpecs(opts.where);
       if (Object.keys(wheres).length > 0) {
         if (!isSubset) {
@@ -493,6 +502,7 @@ program
             dialect.createRowFetcher(client),
             wheres,
             !!opts.sample,
+            !!opts.children,
           ),
           config,
         );
