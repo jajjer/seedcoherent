@@ -18,13 +18,17 @@ export class MssqlRowFetcher implements RowFetcher {
     table: TableInfo,
     limit: number,
     where?: string,
+    sample?: boolean,
   ): Promise<Row[]> {
     // SQL Server has no LIMIT — TOP (n) does the job (needs an ORDER BY to be
-    // deterministic, which the primary key provides when present).
+    // deterministic, which the primary key provides when present). With
+    // --sample, ORDER BY NEWID() shuffles instead, so TOP (n) is a random draw.
     const filter = where ? ` WHERE ${where}` : "";
-    const order = table.primaryKey.length
-      ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
-      : "";
+    const order = sample
+      ? " ORDER BY NEWID()"
+      : table.primaryKey.length
+        ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
+        : "";
     const res = await this.conn.query<Row>(
       `SELECT TOP (@p1) * FROM ${qual(table)}${filter}${order}`,
       [limit],

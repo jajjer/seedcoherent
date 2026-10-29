@@ -272,6 +272,7 @@ Sample rows:
 | `--truncate` | `TRUNCATE ... RESTART IDENTITY CASCADE` before inserting |
 | `--subset <table=n...>` | Subset + anonymize real data (see below) |
 | `--where <table=predicate...>` | Filter which subset root rows are seeded (see below) |
+| `--sample` | Subset: pick root rows at random instead of the first N by primary key (see below) |
 | `--to <connection>` | Target DB to insert the anonymized subset into |
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
@@ -568,6 +569,24 @@ user wouldn't match a user-level predicate). The spec splits on the **first**
 > ⚠️ The predicate is **raw SQL spliced into the source query** — the same trust
 > model as the connection string. Only pass operator-authored input; it is not a
 > place for untrusted or user-supplied values.
+
+### Random sampling (`--sample`)
+
+By default each root table contributes its **oldest** `n` rows (`ORDER BY <pk>
+LIMIT n`), which skews a subset toward the earliest-created records. `--sample`
+instead draws `n` rows **at random** (`ORDER BY random()` / `RAND()` / `NEWID()`
+depending on the engine), for a more representative extract:
+
+```bash
+# A random 500 orders (plus every user/product they reference).
+npx seedcoherent $PROD_URL --subset orders=500 --sample --to $STAGING_URL
+```
+
+`--sample` is a single switch that applies to **all** `--subset` root tables, and
+it composes with `--where` — the predicate filters first, then `n` rows are
+sampled at random from the matches. Only root selection changes; the upward FK
+closure still pulls referenced parents by exact key. The sample is
+**non-deterministic**: each run returns a different set of rows.
 
 ### Per-column control
 

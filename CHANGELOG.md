@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] — 2026-10-29
+
+### Added
+
+- **`--sample`: pick subset root rows at random.** By default `--subset orders=500` takes the oldest 500 rows (`ORDER BY <pk> LIMIT n`), which skews an extract toward the earliest-created records. `--sample` instead draws each root table's `n` rows at random — `ORDER BY random()` (Postgres), `RAND()` (MySQL), `RANDOM()` (SQLite), or `NEWID()` (SQL Server) — for a more representative subset. It is a single switch that applies to **all** `--subset` roots and composes with `--where` (the predicate filters first, then `n` rows are sampled from the matches); only root selection changes, so the upward FK closure still pulls referenced parents by exact key. The sample is **non-deterministic** — each run returns a different set. Threaded through `collectSubset` into each engine's `RowFetcher.fetchRoots`. (Roadmap item 6; per-table sampling, sample rates, and reproducible/seeded sampling are deferred.)
+
 ## [0.27.0] — 2026-10-28
 
 ### Added

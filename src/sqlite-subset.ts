@@ -17,11 +17,14 @@ export class SqliteRowFetcher implements RowFetcher {
     table: TableInfo,
     limit: number,
     where?: string,
+    sample?: boolean,
   ): Promise<Row[]> {
     const filter = where ? ` WHERE ${where}` : "";
-    const order = table.primaryKey.length
-      ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
-      : "";
+    const order = sample
+      ? " ORDER BY RANDOM()"
+      : table.primaryKey.length
+        ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
+        : "";
     const res = await this.conn.query<Row>(
       `SELECT * FROM ${ref(table)}${filter}${order} LIMIT ?`,
       [limit],

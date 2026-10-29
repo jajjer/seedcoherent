@@ -20,6 +20,8 @@ import type { Connection, Schema, TableInfo } from "../src/types.js";
  * looked up by the exact predicate string via the optional `predicates` map.
  */
 class FakeFetcher implements RowFetcher {
+  /** Records the `sample` flag passed to the most recent fetchRoots call. */
+  lastSample?: boolean;
   constructor(
     private data: Record<string, Row[]>,
     private predicates: Record<string, (row: Row) => boolean> = {},
@@ -28,7 +30,9 @@ class FakeFetcher implements RowFetcher {
     t: TableInfo,
     limit: number,
     where?: string,
+    sample?: boolean,
   ): Promise<Row[]> {
+    this.lastSample = sample;
     let rows = this.data[t.name] ?? [];
     if (where) {
       const pred = this.predicates[where];
@@ -206,6 +210,38 @@ test("--where filters root rows but FK parents are still pulled", async () => {
     byKey(sel, "public.users").map((r) => r.id),
     [1],
   );
+});
+
+test("--sample is forwarded to fetchRoots; default is false", async () => {
+  const s = shopSchema();
+  const plain = new FakeFetcher(shopData());
+  await collectSubset(s, { users: 2 }, plain);
+  assert.equal(plain.lastSample, false);
+
+  const sampled = new FakeFetcher(shopData());
+  await collectSubset(s, { users: 2 }, sampled, {}, true);
+  assert.equal(sampled.lastSample, true);
+});
+
+test("PgRowFetcher.fetchRoots uses ORDER BY random() when sampling", async () => {
+  const calls: { sql: string; params?: unknown[] }[] = [];
+  const client: Connection = {
+    async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return { rows: [] as T[] };
+    },
+    async end() {},
+  };
+  const users = table("users", {
+    columns: [idCol(), col("tenant_id", { udtName: "int4" })],
+    primaryKey: ["id"],
+  });
+  await new PgRowFetcher(client).fetchRoots(users, 25, "tenant_id = 42", true);
+  assert.equal(
+    calls[0].sql,
+    'SELECT * FROM "public"."users" WHERE tenant_id = 42 ORDER BY random() LIMIT $1',
+  );
+  assert.deepEqual(calls[0].params, [25]);
 });
 
 test("PgRowFetcher.fetchRoots splices WHERE before ORDER BY/LIMIT", async () => {

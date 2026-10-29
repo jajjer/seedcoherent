@@ -166,6 +166,10 @@ program
     [],
   )
   .option(
+    "--sample",
+    "subset: pick root rows at random instead of the first N by primary key",
+  )
+  .option(
     "--anonymize <col...>",
     "subset: also scrub these join keys, e.g. accounts.email (remaps the whole join)",
     [],
@@ -339,6 +343,11 @@ program
       if (opts.json && !opts.scan) {
         program.error("--json only applies to --scan.");
       }
+      if (opts.sample && !isSubset) {
+        program.error(
+          "--sample selects random --subset root rows; pass --subset <spec...> too.",
+        );
+      }
       const wheres = parseWhereSpecs(opts.where);
       if (Object.keys(wheres).length > 0) {
         if (!isSubset) {
@@ -483,6 +492,7 @@ program
             parseRowSpecs(opts.subset),
             dialect.createRowFetcher(client),
             wheres,
+            !!opts.sample,
           ),
           config,
         );
