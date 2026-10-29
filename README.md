@@ -275,6 +275,8 @@ Sample rows:
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
 | `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
+| `--scan` | Print a per-column privacy report and exit without copying (see below) |
+| `--json` | With `--scan`, emit the report as JSON instead of a table |
 
 ### Null rates
 
@@ -591,6 +593,43 @@ groups merge. `--link` is for *non-key* columns — join keys are already kept
 consistent by `--anonymize`, so naming a key column in a link is rejected. The
 config file's `link` field takes an array of groups, e.g.
 `"link": [["users.email", "orders.customer_email"]]`.
+
+### Scan: a pre-copy privacy report (`--scan`)
+
+Before you copy anything, `--scan` shows exactly what would happen to every
+column — its PII classification and the action the copy would take:
+
+- **`scrub`** — replaced with a fake value;
+- **`keep`** — passed through verbatim because `--preserve` opted it out;
+- **`key`** — passed through verbatim because it is a primary key, a foreign-key
+  column, or a column some FK references (so joins stay valid).
+
+It introspects the schema and exits — **no source rows are read and nothing is
+written**, so it needs no `--to`/`--out`. The row counts in `--subset` are
+ignored (scan is schema-level), but `--subset` is still required: it selects
+subset mode, and the report reflects your `--anonymize`/`--preserve`/`--link`
+flags. Rows where PII would be copied unchanged (a `key`/`keep` action on a
+classified column) are marked `⚠` — those are what a reviewer should scrutinize.
+
+```bash
+# Human-readable table, honoring the same flags the real copy would use.
+npx seedcoherent $PROD_URL --subset users=1 --scan \
+  --preserve users.country --anonymize accounts.email
+
+# Machine-readable for a security-team sign-off gate.
+npx seedcoherent $PROD_URL --subset users=1 --scan --json > privacy-report.json
+```
+
+```
+    COLUMN                TYPE     PII                   ACTION
+  ⚠ main.contacts.email   TEXT     email (medium)        key
+    main.users.country    TEXT     geo (low)             scrub
+    main.users.full_name  TEXT     person_name (medium)  scrub
+    main.users.ssn        TEXT     ssn (high)            scrub
+    main.users.id         INTEGER  —                     key
+
+  5 columns · 3 PII · 1 PII copied verbatim ⚠
+```
 
 ## Append to a database that already has data
 
