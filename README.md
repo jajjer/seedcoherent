@@ -271,6 +271,7 @@ Sample rows:
 | `--append` | Add rows to a database that already has data (see below) |
 | `--truncate` | `TRUNCATE ... RESTART IDENTITY CASCADE` before inserting |
 | `--subset <table=n...>` | Subset + anonymize real data (see below) |
+| `--where <table=predicate...>` | Filter which subset root rows are seeded (see below) |
 | `--to <connection>` | Target DB to insert the anonymized subset into |
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
@@ -537,6 +538,36 @@ sample rows are the actual anonymized values that would land in the target.
 ```bash
 npx seedcoherent $PROD_URL --subset orders=500 --dry-run --seed 42
 ```
+
+### Filtering root rows (`--where`)
+
+By default each root table contributes its **oldest** `n` rows (`ORDER BY <pk>
+LIMIT n`). `--where <table>=<predicate>` instead seeds the roots that match a
+SQL predicate, so you can pull a targeted slice — recent rows, a single tenant,
+non-deleted records:
+
+```bash
+# Only orders from the last 30 days (plus every user/product they reference).
+npx seedcoherent $PROD_URL \
+  --subset orders=500 --where orders="created_at > now() - interval '30 days'" \
+  --to $STAGING_URL
+
+# Repeatable — one predicate per root table.
+npx seedcoherent $PROD_URL \
+  --subset orders=500 users=100 \
+  --where orders="total > 100" --where users="tenant_id = 42" \
+  --to $STAGING_URL
+```
+
+The flag only filters tables named in `--subset`; the upward FK closure still
+pulls every referenced parent row **unfiltered**, so the slice stays
+referentially complete (a filtered order still brings in its user, even if that
+user wouldn't match a user-level predicate). The spec splits on the **first**
+`=`, so a predicate may itself contain `=` (e.g. `users=tenant_id = 42`).
+
+> ⚠️ The predicate is **raw SQL spliced into the source query** — the same trust
+> model as the connection string. Only pass operator-authored input; it is not a
+> place for untrusted or user-supplied values.
 
 ### Per-column control
 

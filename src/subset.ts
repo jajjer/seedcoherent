@@ -29,8 +29,12 @@ import type { Config, Connection, Schema, TableInfo } from "./types.js";
 
 /** Abstracts the SELECT queries so the closure logic is testable off-DB. */
 export interface RowFetcher {
-  /** Seed rows: up to `limit` from a root table, in a stable order. */
-  fetchRoots(table: TableInfo, limit: number): Promise<Row[]>;
+  /**
+   * Seed rows: up to `limit` from a root table, in a stable order. An optional
+   * raw-SQL `where` predicate (operator-trusted, from `--where`) filters which
+   * root rows are selected before the ORDER BY … LIMIT.
+   */
+  fetchRoots(table: TableInfo, limit: number, where?: string): Promise<Row[]>;
   /** Rows whose `columns` tuple matches one of `keys` — for pulling parents. */
   fetchByKeys(
     table: TableInfo,
@@ -54,12 +58,17 @@ const qual = (t: TableInfo) => `${ident(t.schema)}.${ident(t.name)}`;
 export class PgRowFetcher implements RowFetcher {
   constructor(private client: Connection) {}
 
-  async fetchRoots(table: TableInfo, limit: number): Promise<Row[]> {
+  async fetchRoots(
+    table: TableInfo,
+    limit: number,
+    where?: string,
+  ): Promise<Row[]> {
+    const filter = where ? ` WHERE ${where}` : "";
     const order = table.primaryKey.length
       ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
       : "";
     const res = await this.client.query(
-      `SELECT * FROM ${qual(table)}${order} LIMIT $1`,
+      `SELECT * FROM ${qual(table)}${filter}${order} LIMIT $1`,
       [limit],
     );
     return res.rows;
@@ -147,6 +156,7 @@ export async function collectSubset(
   schema: Schema,
   roots: Record<string, number>,
   fetcher: RowFetcher,
+  wheres: Record<string, string> = {},
 ): Promise<Map<string, Row[]>> {
   const selected = new Map<string, Map<string, Row>>();
   const pending: Array<{ table: TableInfo; rows: Row[] }> = [];
@@ -168,7 +178,7 @@ export async function collectSubset(
   for (const [spec, limit] of Object.entries(roots)) {
     const table = resolveTable(schema, spec);
     if (!table) throw new Error(`--subset: unknown table "${spec}"`);
-    add(table, await fetcher.fetchRoots(table, limit));
+    add(table, await fetcher.fetchRoots(table, limit, wheres[spec]));
   }
 
   // Upward closure: for each newly added row, ensure its FK parents exist.

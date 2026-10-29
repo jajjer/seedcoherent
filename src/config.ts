@@ -52,6 +52,30 @@ export function parseRowSpecs(specs: string[]): Record<string, number> {
 }
 
 /**
+ * Parse repeated `--where table=predicate` CLI flags into a map of root table
+ * to a raw-SQL predicate. Split on the *first* `=` so the predicate may itself
+ * contain `=` (e.g. `users=tenant_id = 42`). The predicate is injected verbatim
+ * into the root SELECT's WHERE clause, so it is operator-trusted SQL.
+ */
+export function parseWhereSpecs(specs: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const spec of specs) {
+    const eq = spec.indexOf("=");
+    if (eq === -1)
+      throw new Error(
+        `Invalid --where spec "${spec}" (expected table=predicate)`,
+      );
+    const table = spec.slice(0, eq).trim();
+    const predicate = spec.slice(eq + 1).trim();
+    if (!table) throw new Error(`Invalid --where spec "${spec}" (empty table)`);
+    if (!predicate)
+      throw new Error(`Invalid --where spec "${spec}" (empty predicate)`);
+    out[table] = predicate;
+  }
+  return out;
+}
+
+/**
  * Parse repeated `column=rate` CLI flags into a null-rate map. `rate` is a
  * fraction in [0, 1] — the probability a nullable column is left NULL per row,
  * e.g. `users.middle_name=0.7` (70% NULL) or `orders.deleted_at=1` (always

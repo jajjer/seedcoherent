@@ -10,6 +10,7 @@ import {
   parseLinkGroups,
   parseNullRateSpecs,
   parseRowSpecs,
+  parseWhereSpecs,
   validateNullRates,
 } from "./config.js";
 import {
@@ -159,6 +160,11 @@ program
     [],
   )
   .option("--to <connection>", "target DB to insert the anonymized subset into")
+  .option(
+    "--where <spec...>",
+    'subset: filter which root rows are seeded with a raw-SQL predicate, e.g. orders="total > 100" (table must be a --subset root; parents are still pulled)',
+    [],
+  )
   .option(
     "--anonymize <col...>",
     "subset: also scrub these join keys, e.g. accounts.email (remaps the whole join)",
@@ -333,6 +339,22 @@ program
       if (opts.json && !opts.scan) {
         program.error("--json only applies to --scan.");
       }
+      const wheres = parseWhereSpecs(opts.where);
+      if (Object.keys(wheres).length > 0) {
+        if (!isSubset) {
+          program.error(
+            "--where filters --subset root rows; pass --subset <spec...> too.",
+          );
+        }
+        const rootTables = new Set(Object.keys(parseRowSpecs(opts.subset)));
+        for (const table of Object.keys(wheres)) {
+          if (!rootTables.has(table)) {
+            program.error(
+              `--where table "${table}" is not a --subset root; --where only filters root tables.`,
+            );
+          }
+        }
+      }
 
       // Profiling learns the shape of the existing data and folds it into the
       // config *beneath* the user's explicit flags. --profile-out dumps that
@@ -460,6 +482,7 @@ program
             schema,
             parseRowSpecs(opts.subset),
             dialect.createRowFetcher(client),
+            wheres,
           ),
           config,
         );

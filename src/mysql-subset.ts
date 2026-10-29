@@ -12,12 +12,17 @@ const qual = (t: TableInfo) => `${ident(t.schema)}.${ident(t.name)}`;
 export class MysqlRowFetcher implements RowFetcher {
   constructor(private conn: Connection) {}
 
-  async fetchRoots(table: TableInfo, limit: number): Promise<Row[]> {
+  async fetchRoots(
+    table: TableInfo,
+    limit: number,
+    where?: string,
+  ): Promise<Row[]> {
+    const filter = where ? ` WHERE ${where}` : "";
     const order = table.primaryKey.length
       ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
       : "";
     const res = await this.conn.query<Row>(
-      `SELECT * FROM ${qual(table)}${order} LIMIT ?`,
+      `SELECT * FROM ${qual(table)}${filter}${order} LIMIT ?`,
       [limit],
     );
     return res.rows;

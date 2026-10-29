@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] — 2026-10-28
+
+### Added
+
+- **`--where`: filter which subset root rows are seeded.** By default `--subset orders=500` takes the oldest 500 rows (`ORDER BY <pk> LIMIT n`). `--where <table>=<predicate>` injects a raw-SQL predicate into a root table's seed query so you can pull a targeted slice — e.g. `--where orders="created_at > now() - interval '30 days'"` or `--where users="tenant_id = 42"`. The flag is repeatable (one predicate per root table), splits on the **first** `=` so predicates may themselves contain `=`, and only applies to tables named in `--subset`; the upward FK closure still pulls every referenced parent row unfiltered, so the slice stays referentially complete. The predicate is **raw SQL executed against the source database** — same trust model as the connection string; only pass operator-trusted input. Threaded through `collectSubset` into each engine's `RowFetcher.fetchRoots` (Postgres, MySQL, SQLite, SQL Server). New exported helper `parseWhereSpecs` in `src/config.ts`. (Roadmap item 5.)
+
 ## [0.26.0] — 2026-10-28
 
 ### Added

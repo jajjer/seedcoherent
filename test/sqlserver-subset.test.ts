@@ -34,6 +34,16 @@ test("fetchRoots uses TOP (n) with a bound limit, ordered by PK", async () => {
   assert.deepEqual(conn.calls[0].params, [25]);
 });
 
+test("fetchRoots splices a WHERE predicate before ORDER BY", async () => {
+  const conn = new RecordingConn();
+  await new MssqlRowFetcher(conn).fetchRoots(users, 25, "total > 100");
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT TOP (@p1) * FROM [dbo].[users] WHERE total > 100 ORDER BY [id]",
+  );
+  assert.deepEqual(conn.calls[0].params, [25]);
+});
+
 test("fetchByKeys uses IN (@p...) for a single-column key", async () => {
   const conn = new RecordingConn();
   await new MssqlRowFetcher(conn).fetchByKeys(users, ["id"], [[1], [2], [3]]);
