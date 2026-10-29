@@ -6,6 +6,8 @@
 
 import { Faker } from "@faker-js/faker";
 import { valueSampler } from "./distribution.js";
+import { ctxFor, has, or, tok, type MatchCtx } from "./match.js";
+import { piiGenerator } from "./pii.js";
 import type {
   ColumnCheck,
   ColumnInfo,
@@ -18,48 +20,11 @@ import type {
 
 export type Generator = (f: Faker) => unknown;
 
-/** Normalize a column name for matching: lowercase, strip separators. */
-function norm(name: string): string {
-  return name.toLowerCase().replace(/[_\s-]+/g, "");
-}
-
-/** Split into lowercased tokens across underscores/hyphens and camelCase. */
-function tokenize(name: string): string[] {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
-
-interface MatchCtx {
-  /** Whole-string, separators removed: "shippingcity". */
-  n: string;
-  /** Token list: ["shipping", "city"]. */
-  tokens: string[];
-}
-
 /** A name-based rule: if the column name matches, use this generator. */
 interface NameRule {
   test: (c: MatchCtx) => boolean;
   gen: Generator;
 }
-
-/** Substring match on the joined name — for long, unambiguous fragments. */
-const has =
-  (...frags: string[]) =>
-  (c: MatchCtx) =>
-    frags.some((f) => c.n.includes(f));
-/** Whole-token match — for short/ambiguous fragments ("ip", "lat", "name"). */
-const tok =
-  (...names: string[]) =>
-  (c: MatchCtx) =>
-    names.some((x) => c.tokens.includes(x));
-/** Combine matchers: true if any matches. */
-const or =
-  (...fns: Array<(c: MatchCtx) => boolean>) =>
-  (c: MatchCtx) =>
-    fns.some((fn) => fn(c));
 
 /** Ordered — first match wins, so put specific rules before generic ones. */
 const NAME_RULES: NameRule[] = [
@@ -396,7 +361,7 @@ const JSON_RULES: NameRule[] = [
  * valid, varied object).
  */
 function jsonGenerator(col: ColumnInfo): Generator {
-  const ctx: MatchCtx = { n: norm(col.name), tokens: tokenize(col.name) };
+  const ctx: MatchCtx = ctxFor(col.name);
   for (const rule of JSON_RULES) {
     if (rule.test(ctx)) return rule.gen;
   }
@@ -580,13 +545,18 @@ function baseGenerator(table: TableInfo, col: ColumnInfo): Generator {
   // Enum columns must draw from their allowed labels regardless of the name.
   if (col.dataType === "enum") return generatorForType(col);
 
-  const ctx: MatchCtx = { n: norm(col.name), tokens: tokenize(col.name) };
+  const ctx: MatchCtx = ctxFor(col.name);
   // Numeric columns get their own name rules; text/date name rules can't apply.
   if (col.dataType === "integer" || col.dataType === "decimal") {
     for (const rule of NUMERIC_NAME_RULES) {
       if (rule.test(ctx)) return (f) => rule.gen(f, col);
     }
   }
+  // High-risk PII categories (SSN, tax id, passport, …) that the name rules
+  // below don't cover get a dedicated, realistic generator — but only when the
+  // column type can hold it, same gate as the name rules.
+  const pii = piiGenerator(col);
+  if (pii && isCompatible(col)) return pii;
   for (const rule of NAME_RULES) {
     if (rule.test(ctx)) {
       // Only accept a name-based text/date rule if the column type is compatible;

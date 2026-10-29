@@ -536,3 +536,28 @@ test("--secret with different key produces different fakes", async () => {
   // Different secrets almost certainly produce different output (collision probability ~1/vocab size).
   assert.notEqual(name(run1), name(run2), "different secrets produce different fakes");
 });
+
+test("anonymize scrubs a PII ssn column to a differently-shaped fake", async () => {
+  const people = table("people", {
+    columns: [idCol(), col("ssn")],
+    primaryKey: ["id"],
+  });
+  const s = schema(people);
+  const { order } = topoSort(s);
+  const data = {
+    people: [
+      { id: 1, ssn: "111-22-3333" },
+      { id: 2, ssn: "444-55-6666" },
+    ],
+  };
+  const sel = await collectSubset(s, { people: 10 }, new FakeFetcher(data));
+  const out = anonymizeAll(s, order, sel, { seed: 5 });
+
+  const rows = out.find((x) => x.table.key === "public.people")!.rows;
+  for (const r of rows) {
+    // Scrubbed, but still shaped like an SSN.
+    assert.match(r.ssn as string, /^\d{3}-\d{2}-\d{4}$/);
+  }
+  assert.notEqual(rows[0].ssn, "111-22-3333", "original ssn is replaced");
+  assert.notEqual(rows[1].ssn, "444-55-6666", "original ssn is replaced");
+});

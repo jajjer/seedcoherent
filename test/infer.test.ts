@@ -73,6 +73,22 @@ test("uuid column yields a uuid string", () => {
   assert.match(v as string, /^[0-9a-f-]{36}$/i);
 });
 
+test("ssn column yields a formatted social security number", () => {
+  const v = gen(col("ssn")) as string;
+  assert.match(v, /^\d{3}-\d{2}-\d{4}$/);
+});
+
+test("routing_number column yields digits", () => {
+  const v = gen(col("routing_number")) as string;
+  assert.match(v, /^\d+$/);
+});
+
+test("PII name generator is skipped when the column type is incompatible", () => {
+  // An integer column named "ssn" must get a number, not a formatted string.
+  const v = gen(col("ssn", { udtName: "int4" }));
+  assert.equal(typeof v, "number");
+});
+
 test("money column yields a numeric string", () => {
   const v = gen(col("balance", { udtName: "money" })) as string;
   assert.equal(typeof v, "string");
