@@ -1,6 +1,6 @@
 # seedcoherent
 
-**Point it at your Postgres, MySQL, or SQLite schema, get coherent, referentially-correct fake data.**
+**Point it at your Postgres, MySQL, SQLite, or SQL Server schema, get coherent, referentially-correct fake data.**
 
 ![seedcoherent demo](demo/demo.gif)
 
@@ -14,12 +14,15 @@ column *names* drive realistic content — `email` gets emails, `price` gets mon
 npx seedcoherent postgres://localhost/mydb --rows users=1000 orders=5000
 npx seedcoherent mysql://root@localhost/mydb --rows users=1000 orders=5000
 npx seedcoherent ./mydb.sqlite --rows users=1000 orders=5000
+npx seedcoherent 'sqlserver://sa:pass@localhost:1433/mydb' --rows users=1000 orders=5000
 ```
 
 The database is picked from the connection string: a `postgres://` /
-`postgresql://` or `mysql://` scheme selects that engine, while a `sqlite:` /
-`file:` URL, a `:memory:` marker, or a bare path to a `.db` / `.sqlite` /
-`.sqlite3` file selects SQLite — so the same commands work against any of them.
+`postgresql://` or `mysql://` scheme selects that engine, a `sqlserver://` /
+`mssql://` scheme selects SQL Server, while a `sqlite:` / `file:` URL, a
+`:memory:` marker, or a bare path to a `.db` / `.sqlite` / `.sqlite3` file selects
+SQLite — so the same commands work against any of them. (For a local SQL Server
+without TLS, append `?encrypt=false&trustServerCertificate=true`.)
 
 That's it. No config, no schema annotations, no per-column mapping. It introspects
 everything and inserts in dependency order inside a single transaction.
@@ -107,15 +110,19 @@ everything and inserts in dependency order inside a single transaction.
 - **Fast.** ~300k rows/sec end-to-end (generate + insert) on SQLite — a 1.1M-row,
   5-table graph seeds in under 4 seconds on a laptop. Run `npm run benchmark` to
   measure it on your machine.
-- **Three databases, one tool.** Postgres, MySQL, and SQLite, selected from the
-  connection string — same flags, same behavior. On MySQL, `AUTO_INCREMENT` PKs,
-  `ENUM`, `tinyint(1)` booleans, `JSON`, and `CHECK` constraints (8.0.16+) are all
-  understood; rows stream in as batched multi-row `INSERT`s (MySQL has no `COPY`).
-  On SQLite, the `INTEGER PRIMARY KEY` rowid alias, type affinity (with `DATETIME`
-  / `BOOLEAN` / `JSON` hints honored), and `CHECK (x IN (...))` — the idiomatic
-  stand-in for enums — are all understood.
-- **Zero install.** One `npx` command against any Postgres, MySQL, or SQLite
-  database (SQLite needs no server — just a file).
+- **Four databases, one tool.** Postgres, MySQL, SQLite, and SQL Server, selected
+  from the connection string — same flags, same behavior. On MySQL,
+  `AUTO_INCREMENT` PKs, `ENUM`, `tinyint(1)` booleans, `JSON`, and `CHECK`
+  constraints (8.0.16+) are all understood; rows stream in as batched multi-row
+  `INSERT`s (MySQL has no `COPY`). On SQLite, the `INTEGER PRIMARY KEY` rowid
+  alias, type affinity (with `DATETIME` / `BOOLEAN` / `JSON` hints honored), and
+  `CHECK (x IN (...))` — the idiomatic stand-in for enums — are all understood.
+  On SQL Server, `IDENTITY` PKs (seeded with `SET IDENTITY_INSERT` + a
+  `DBCC CHECKIDENT` reseed), `bit` booleans, `uniqueidentifier`, `datetime2`, and
+  `CHECK` constraints are understood; rows stream in as batched multi-row
+  `INSERT`s and `--on-conflict` renders a `MERGE`.
+- **Zero install.** One `npx` command against any Postgres, MySQL, SQLite, or SQL
+  Server database (SQLite needs no server — just a file).
 
 ## Usage
 
@@ -174,10 +181,11 @@ npx seedcoherent --schema-file schema.sql --config prod-shape.json --rows users=
 
 Connection string comes from the first argument or `DATABASE_URL`. A
 `postgres://`/`postgresql://` URL selects Postgres; a `mysql://` URL selects
-MySQL; a `sqlite:`/`file:` URL, `:memory:`, or a bare `.db`/`.sqlite`/`.sqlite3`
-path selects SQLite. On Postgres `--schema` defaults to `public`; on MySQL it
-defaults to the database named in the connection string; on SQLite it defaults
-to `main`.
+MySQL; a `sqlserver://`/`mssql://` URL selects SQL Server; a `sqlite:`/`file:`
+URL, `:memory:`, or a bare `.db`/`.sqlite`/`.sqlite3` path selects SQLite. On
+Postgres `--schema` defaults to `public`; on MySQL it defaults to the database
+named in the connection string; on SQL Server it defaults to `dbo`; on SQLite it
+defaults to `main`.
 
 `--schema-file <path>` skips the connection entirely: it reads a `.sql`/DDL file
 (a migration or a `pg_dump`/`mysqldump`/`.schema` dump) and builds the same model
@@ -186,14 +194,15 @@ exists. It needs a `-o <file>`/`--print`/`--dry-run` output — there's no datab
 to insert into — and the live-only modes (`--append`, `--subset`, `--to`,
 `--truncate`) don't apply.
 
-`--dialect postgres|mysql|sqlite` (default `postgres`) selects the engine: it
-picks both the DDL grammar to parse *and* the flavor of SQL to emit, so a MySQL
-schema in gives MySQL seed SQL out. Point it at your own database's schema:
+`--dialect postgres|mysql|sqlite|sqlserver` (default `postgres`) selects the
+engine: it picks both the DDL grammar to parse *and* the flavor of SQL to emit, so
+a MySQL schema in gives MySQL seed SQL out. Point it at your own database's schema:
 
 ```bash
 npx seedcoherent --schema-file schema.sql            --rows users=1000 -o seed.sql  # Postgres DDL → Postgres SQL
 npx seedcoherent --schema-file schema.sql --dialect mysql  --rows users=1000 -o seed.sql  # MySQL DDL → MySQL SQL
 npx seedcoherent --schema-file schema.sql --dialect sqlite --rows users=1000 -o seed.sql  # SQLite DDL → SQLite SQL
+npx seedcoherent --schema-file schema.sql --dialect sqlserver --rows users=1000 -o seed.sql  # SQL Server DDL → T-SQL
 ```
 
 To translate across engines — read one dialect's schema and emit another's seed
@@ -207,7 +216,8 @@ column's category matches a connected one's. All three parse `CREATE TABLE` and
 rowid), length/precision, primary/unique/foreign keys, and the CHECK shapes the
 live parser reads. Postgres adds `CREATE TYPE … AS ENUM`; MySQL reads inline
 `ENUM(...)`, `tinyint(1)` booleans, and `USE <db>`; SQLite honors declared-type
-affinity and `CHECK (x IN (...))`. Statements a grammar can't model (extension
+affinity and `CHECK (x IN (...))`; SQL Server reads `[bracket]` identifiers,
+`IDENTITY(…)`, `N'…'` literals, and `GO` batch separators. Statements a grammar can't model (extension
 types, triggers, views, `SET`, …) are skipped, and any resulting required column
 of an unsynthesizable type is reported up front just as it is on a live run.
 
@@ -686,9 +696,9 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 
 1. **Introspect** — reads tables, columns, PKs, unique/foreign-key/check
    constraints, and enum types from the catalog (`pg_catalog` on Postgres,
-   `information_schema` on MySQL, `PRAGMA` + `sqlite_master` on SQLite). On
-   Postgres it also resolves partition strategy + bounds and full type detail
-   (arrays, composites, ranges, domains).
+   `information_schema` on MySQL, the `sys.*` catalog on SQL Server, `PRAGMA` +
+   `sqlite_master` on SQLite). On Postgres it also resolves partition strategy +
+   bounds and full type detail (arrays, composites, ranges, domains).
 2. **Order** — topologically sorts tables so parents populate before children;
    cycles and self-references are broken and handled with a deferred pass.
 3. **Infer** — picks a value generator per column from its name and type. The
@@ -699,9 +709,9 @@ npm run dev -- postgres://postgres:postgres@localhost:5432/postgres \
 5. **Emit** — streams rows in dependency order, batched (`--batch-size`) so
    generation never holds the whole dataset in memory, all inside one
    transaction: `COPY ... FROM STDIN` on Postgres, batched multi-row `INSERT` on
-   MySQL and SQLite. `--out`/`--print` write a runnable SQL script for the source
-   dialect instead, or — with `--format csv`/`ndjson` — one plain-text data file
-   per table.
+   MySQL, SQLite, and SQL Server. `--out`/`--print` write a runnable SQL script for
+   the source dialect instead, or — with `--format csv`/`ndjson` — one plain-text
+   data file per table.
 
 ## Tests
 
@@ -721,23 +731,41 @@ docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres npm test
 ```
 
+The MySQL and SQL Server integration tests are gated the same way, on `MYSQL_URL`
+and `MSSQL_URL`:
+
+```bash
+docker run -d --name mssql -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD='Str0ng!Passw0rd' \
+  -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
+MSSQL_URL='sqlserver://sa:Str0ng!Passw0rd@localhost:1433/master?encrypt=false&trustServerCertificate=true' npm test
+```
+
 ## Status
 
-v0 — Postgres, MySQL, and SQLite, with three modes: generate-from-scratch,
-append to an already-populated database, and subset + anonymize real production
-data into staging. The schema can come from a live connection or, for
-generate-from-scratch, from a Postgres, MySQL, or SQLite `.sql`/DDL file
-(`--schema-file --dialect …`) so a run needs no database at all. On the roadmap:
-hosted generation.
+v0 — Postgres, MySQL, SQLite, and SQL Server, with three modes:
+generate-from-scratch, append to an already-populated database, and subset +
+anonymize real production data into staging. The schema can come from a live
+connection or, for generate-from-scratch, from a Postgres, MySQL, SQLite, or SQL
+Server `.sql`/DDL file (`--schema-file --dialect …`) so a run needs no database at
+all. On the roadmap: hosted generation.
 
 MySQL and SQLite each target a single database per run (the one in the
 connection string / file, or those named via `--schema`); a subset `--to` a
 different staging database works because writes are unqualified and land in the
 target connection's database. Postgres's richer type detail — arrays,
-composites, ranges, domains, partitioning — has no MySQL or SQLite equivalent
-and stays Postgres-only; MySQL `CHECK` constraints are read where the server
-exposes them (MySQL 8.0.16+ / MariaDB 10.2+) and honored for the numeric-range
-and length shapes the parser recognizes.
+composites, ranges, domains, partitioning — has no MySQL, SQLite, or SQL Server
+equivalent and stays Postgres-only; MySQL `CHECK` constraints are read where the
+server exposes them (MySQL 8.0.16+ / MariaDB 10.2+) and honored for the
+numeric-range and length shapes the parser recognizes.
+
+SQL Server reads its schema from the `sys.*` catalog (schema-qualified, defaulting
+to `dbo`). `IDENTITY` columns are seeded with `SET IDENTITY_INSERT` and their seed
+reset afterward via `DBCC CHECKIDENT`; rows load as batched multi-row `INSERT`s
+(no `COPY`), and because SQL Server has no `ON CONFLICT`/`MERGE`-free upsert,
+`--on-conflict skip`/`update` render a `MERGE`. It has no native JSON, array,
+enum, composite, or range type (JSON lives in an `nvarchar` column), so those stay
+Postgres-only; `CHECK` constraints are honored for the numeric-range, length, and
+`IN (...)` membership shapes the parser recognizes, like MySQL and SQLite.
 
 SQLite is dynamically typed, so a column's category is inferred from its
 declared type: semantic names (`DATETIME`, `BOOLEAN`, `JSON`, `UUID`) are

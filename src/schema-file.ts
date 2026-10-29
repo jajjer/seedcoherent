@@ -25,7 +25,7 @@ import type {
 } from "./types.js";
 
 /** Which DDL grammar a schema file is written in — one front-end per engine. */
-export type SchemaFileDialect = "postgres" | "mysql" | "sqlite";
+export type SchemaFileDialect = "postgres" | "mysql" | "sqlite" | "sqlserver";
 
 /**
  * Friendly Postgres type names (as written in DDL) mapped to the `udt` name
@@ -444,7 +444,7 @@ export function loadSchemaFromDdl(
   sql: string,
   dialect: SchemaFileDialect = "postgres",
 ): Schema {
-  if (dialect === "mysql" || dialect === "sqlite")
+  if (dialect === "mysql" || dialect === "sqlite" || dialect === "sqlserver")
     return loadSchemaFromSqlDdl(sql, dialect);
   return loadPostgresDdl(sql);
 }

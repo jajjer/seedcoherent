@@ -105,11 +105,27 @@ export interface ProfileResult {
  * surface works for all three engines without placeholder differences.
  */
 export class SqlProfiler implements Profiler {
+  /**
+   * `limitStyle` selects the row-cap syntax: `"limit"` appends `LIMIT n`
+   * (Postgres/MySQL/SQLite); `"top"` emits `SELECT TOP (n) ...` (SQL Server, which
+   * has no LIMIT).
+   */
   constructor(
     private conn: Connection,
     private ident: (s: string) => string,
     private ref: (t: TableInfo) => string,
+    private limitStyle: "limit" | "top" = "limit",
   ) {}
+
+  /** `TOP (n) ` to splice right after SELECT, or "" when the style appends LIMIT. */
+  private top(n: number): string {
+    return this.limitStyle === "top" ? `TOP (${intLit(n)}) ` : "";
+  }
+
+  /** ` LIMIT n` suffix, or "" when the style uses TOP. */
+  private limit(n: number): string {
+    return this.limitStyle === "top" ? "" : ` LIMIT ${intLit(n)}`;
+  }
 
   async counts(
     table: TableInfo,
@@ -130,8 +146,8 @@ export class SqlProfiler implements Profiler {
   ): Promise<Array<{ value: unknown; count: number }>> {
     const c = this.ident(column);
     const res = await this.conn.query<{ v: unknown; cnt: unknown }>(
-      `SELECT ${c} AS v, COUNT(*) AS cnt FROM ${this.ref(table)} WHERE ${c} IS NOT NULL ` +
-        `GROUP BY ${c} ORDER BY cnt DESC, ${c} ASC LIMIT ${intLit(limit)}`,
+      `SELECT ${this.top(limit)}${c} AS v, COUNT(*) AS cnt FROM ${this.ref(table)} WHERE ${c} IS NOT NULL ` +
+        `GROUP BY ${c} ORDER BY cnt DESC, ${c} ASC${this.limit(limit)}`,
     );
     return res.rows.map((r) => ({ value: r.v, count: num(r.cnt) }));
   }
@@ -145,8 +161,8 @@ export class SqlProfiler implements Profiler {
     const notNull = cols.map((c) => `${c} IS NOT NULL`).join(" AND ");
     const grouped = cols.join(", ");
     const res = await this.conn.query<{ cnt: unknown }>(
-      `SELECT COUNT(*) AS cnt FROM ${this.ref(table)} WHERE ${notNull} ` +
-        `GROUP BY ${grouped} ORDER BY cnt DESC LIMIT ${intLit(limit)}`,
+      `SELECT ${this.top(limit)}COUNT(*) AS cnt FROM ${this.ref(table)} WHERE ${notNull} ` +
+        `GROUP BY ${grouped} ORDER BY cnt DESC${this.limit(limit)}`,
     );
     return res.rows.map((r) => num(r.cnt));
   }

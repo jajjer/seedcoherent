@@ -7,6 +7,7 @@
 import pg from "pg";
 import mysql from "mysql2/promise";
 import Database from "better-sqlite3";
+import mssql from "mssql";
 import {
   CopySink,
   insertData as insertDataPg,
@@ -21,11 +22,14 @@ import { MysqlRowFetcher } from "./mysql-subset.js";
 import { insertDataSqlite, SqliteSink, toSqlSqlite } from "./sqlite-emit.js";
 import { introspectSqlite } from "./sqlite-introspect.js";
 import { SqliteRowFetcher } from "./sqlite-subset.js";
+import { insertDataMssql, MssqlSink, toSqlMssql } from "./sqlserver-emit.js";
+import { introspectMssql } from "./sqlserver-introspect.js";
+import { MssqlRowFetcher } from "./sqlserver-subset.js";
 import { PgRowFetcher, type RowFetcher } from "./subset.js";
 import { SqlProfiler, type Profiler } from "./profile.js";
 import type { Connection, Schema, TableInfo } from "./types.js";
 
-export type DialectName = "postgres" | "mysql" | "sqlite";
+export type DialectName = "postgres" | "mysql" | "sqlite" | "sqlserver";
 
 export interface SinkOptions {
   truncate?: boolean;
@@ -246,6 +250,92 @@ const sqliteDialect: Dialect = {
 };
 
 /**
+ * Parse an `mssql://` / `sqlserver://` URL into an `mssql` pool config. The pool is
+ * pinned to a single connection so session state — the transaction, `SET
+ * IDENTITY_INSERT`, `DBCC CHECKIDENT` — stays on one physical connection across
+ * the many statements a sink issues. `encrypt`/`trustServerCertificate` default
+ * to a secure connection; a local server can opt out with
+ * `?encrypt=false&trustServerCertificate=true`.
+ */
+export function mssqlConfig(connStr: string): mssql.config {
+  const u = new URL(connStr);
+  const database = decodeURIComponent(u.pathname.replace(/^\//, ""));
+  return {
+    user: decodeURIComponent(u.username) || undefined,
+    password: decodeURIComponent(u.password) || undefined,
+    server: decodeURIComponent(u.hostname),
+    port: u.port ? Number(u.port) : 1433,
+    database: database || undefined,
+    options: {
+      encrypt: u.searchParams.get("encrypt") !== "false",
+      trustServerCertificate:
+        u.searchParams.get("trustServerCertificate") === "true",
+    },
+    pool: { max: 1, min: 1 },
+  };
+}
+
+/** Wraps an `mssql` single-connection pool as a driver-neutral Connection (`@pN` params). */
+class MssqlConnection implements Connection {
+  constructor(private pool: mssql.ConnectionPool) {}
+  async query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }> {
+    const req = this.pool.request();
+    (params ?? []).forEach((v, i) => req.input(`p${i + 1}`, v));
+    const res = await req.query(sql);
+    return { rows: (res.recordset ?? []) as unknown as T[] };
+  }
+  async end(): Promise<void> {
+    await this.pool.close();
+  }
+}
+
+const sqlserverDialect: Dialect = {
+  name: "sqlserver",
+  async connect(connStr) {
+    const pool = new mssql.ConnectionPool(mssqlConfig(connStr));
+    await pool.connect();
+    return new MssqlConnection(pool);
+  },
+  defaultSchemas() {
+    return ["dbo"];
+  },
+  introspect(conn, schemas) {
+    return introspectMssql(conn, schemas);
+  },
+  createRowFetcher(conn) {
+    return new MssqlRowFetcher(conn);
+  },
+  createProfiler(conn) {
+    const ident = (s: string) => `[${s.replace(/\]/g, "]]")}]`;
+    return new SqlProfiler(
+      conn,
+      ident,
+      (t) => `${ident(t.schema)}.${ident(t.name)}`,
+      "top",
+    );
+  },
+  createSink(conn, opts) {
+    return new MssqlSink(
+      conn,
+      { truncate: opts.truncate, tables: opts.tables },
+      opts.batchSize,
+    );
+  },
+  insertData(conn, data, opts) {
+    return insertDataMssql(conn, data, {
+      truncate: opts.truncate,
+      batchSize: opts.batchSize,
+    });
+  },
+  toScript(data, opts) {
+    return toSqlMssql(data, opts);
+  },
+};
+
+/**
  * Does this connection string point at SQLite? Anything with an explicit
  * `sqlite:`/`file:` scheme, an in-memory marker, or a path with a SQLite file
  * extension — but never a `scheme://host` URL, which stays Postgres/MySQL.
@@ -258,6 +348,7 @@ export function isSqlite(connStr: string): boolean {
 
 export function dialectFor(connStr: string): Dialect {
   if (/^(mysqlx?|mariadb):\/\//i.test(connStr)) return mysqlDialect;
+  if (/^(mssql|sqlserver):\/\//i.test(connStr)) return sqlserverDialect;
   if (isSqlite(connStr)) return sqliteDialect;
   return postgresDialect;
 }
@@ -269,6 +360,8 @@ export function dialectByName(name: DialectName): Dialect {
       return mysqlDialect;
     case "sqlite":
       return sqliteDialect;
+    case "sqlserver":
+      return sqlserverDialect;
     default:
       return postgresDialect;
   }

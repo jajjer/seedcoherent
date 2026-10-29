@@ -19,9 +19,13 @@ import {
   parseEnumValues,
 } from "./mysql-introspect.js";
 import { categorizeSqlite, normalizeSqliteCheck } from "./sqlite-introspect.js";
+import {
+  categorizeMssql,
+  normalizeMssqlCheck,
+} from "./sqlserver-introspect.js";
 import type { ColumnInfo, ForeignKey, Schema, TableInfo } from "./types.js";
 
-export type SqlDialect = "mysql" | "sqlite";
+export type SqlDialect = "mysql" | "sqlite" | "sqlserver";
 
 /** Column attribute / constraint keywords that end a column's type clause. */
 const TYPE_STOP = new Set([
@@ -37,6 +41,7 @@ const TYPE_STOP = new Set([
   "AS",
   "AUTO_INCREMENT",
   "AUTOINCREMENT",
+  "IDENTITY",
   "COLLATE",
   "COMMENT",
   "ON",
@@ -116,8 +121,17 @@ function tokenize(sql: string, dialect: SqlDialect): Tok[] {
       const start = i;
       i++;
       let text = "";
-      while (i < n && sql[i] !== "]") text += sql[i++];
-      i++; // closing ]
+      while (i < n) {
+        if (sql[i] === "]" && sql[i + 1] === "]") {
+          text += "]"; // SQL Server escapes a literal ] as ]]
+          i += 2;
+        } else if (sql[i] === "]") {
+          i++;
+          break;
+        } else {
+          text += sql[i++];
+        }
+      }
       toks.push({ kind: "ident", text, start, end: i });
       continue;
     }
@@ -187,12 +201,16 @@ const kw = (t: Tok | undefined): string =>
 const isPunct = (t: Tok | undefined, c: string): boolean =>
   !!t && t.kind === "punct" && t.text === c;
 
-/** Split a token stream into statements on top-level `;`. */
-function statements(toks: Tok[]): Tok[][] {
+/**
+ * Split a token stream into statements on top-level `;`. When `batchSep` is set
+ * (SQL Server), a lone `GO` batch separator also ends a statement — T-SQL scripts
+ * commonly separate `CREATE TABLE` batches with `GO` and no trailing semicolon.
+ */
+function statements(toks: Tok[], batchSep = false): Tok[][] {
   const out: Tok[][] = [];
   let cur: Tok[] = [];
   for (const t of toks) {
-    if (isPunct(t, ";")) {
+    if (isPunct(t, ";") || (batchSep && kw(t) === "GO")) {
       if (cur.length) out.push(cur);
       cur = [];
     } else {
@@ -347,6 +365,9 @@ function parseColumn(
     enumValues = parseEnumValues(colType);
     dataType = categorizeMysql(base, colType, enumValues);
     udtName = base;
+  } else if (dialect === "sqlserver") {
+    dataType = categorizeMssql(baseType);
+    udtName = baseType;
   } else {
     dataType = categorizeSqlite(rawType);
     udtName = rawType || baseType;
@@ -398,6 +419,12 @@ function parseColumn(
       col.isIdentity = true;
       col.hasDefault = true;
       p += 1;
+    } else if (word === "IDENTITY") {
+      // SQL Server `IDENTITY` or `IDENTITY(seed, increment)`.
+      col.isIdentity = true;
+      col.hasDefault = true;
+      p += 1;
+      if (isPunct(group[p], "(")) p = balancedParen(group, p).after;
     } else if (word === "DEFAULT") {
       col.hasDefault = true;
       p = skipDefaultValue(group, p + 1);
@@ -476,7 +503,11 @@ function pushCheck(
   if (!inner.length) return;
   const raw = sql.slice(inner[0].start, inner[inner.length - 1].end);
   const expr =
-    dialect === "mysql" ? normalizeMysqlCheck(raw) : normalizeSqliteCheck(raw);
+    dialect === "mysql"
+      ? normalizeMysqlCheck(raw)
+      : dialect === "sqlserver"
+        ? normalizeMssqlCheck(raw)
+        : normalizeSqliteCheck(raw);
   table.checks.push({ expr });
 }
 
@@ -663,8 +694,9 @@ function parseAlterTable(
  * introspector so an offline schema matches a connected one.
  */
 export function loadSchemaFromSqlDdl(sql: string, dialect: SqlDialect): Schema {
-  const stmts = statements(tokenize(sql, dialect));
-  let defaultSchema = dialect === "sqlite" ? "main" : "public";
+  const stmts = statements(tokenize(sql, dialect), dialect === "sqlserver");
+  let defaultSchema =
+    dialect === "sqlite" ? "main" : dialect === "sqlserver" ? "dbo" : "public";
   const tables = new Map<string, TableInfo>();
 
   // First pass: `USE db` sets the default schema; `CREATE TABLE` builds tables.

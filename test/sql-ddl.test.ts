@@ -326,3 +326,113 @@ test("sqlite end-to-end: generates coherent, constraint-valid rows", () => {
     );
   }
 });
+
+test("sqlserver: maps types, IDENTITY, brackets, PK/unique, and dbo default schema", () => {
+  const s = load(
+    `
+    CREATE TABLE [dbo].[users] (
+      [id]        INT IDENTITY(1,1) NOT NULL,
+      [email]     NVARCHAR(255) NOT NULL,
+      [is_active] BIT NOT NULL DEFAULT 1,
+      [balance]   DECIMAL(10,2) NOT NULL DEFAULT 0,
+      [created_at] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      [ref]       UNIQUEIDENTIFIER NULL,
+      CONSTRAINT [PK_users] PRIMARY KEY ([id]),
+      CONSTRAINT [UQ_email] UNIQUE ([email])
+    );
+    `,
+    "sqlserver",
+  );
+  const users = tbl(s, "dbo.users");
+
+  const id = column(users, "id");
+  assert.equal(id.dataType, "integer");
+  assert.equal(id.isIdentity, true, "IDENTITY is DB-assigned");
+  assert.ok(id.hasDefault);
+  assert.deepEqual(users.primaryKey, ["id"]);
+  assert.deepEqual(users.uniques, [["email"]]);
+
+  const email = column(users, "email");
+  assert.equal(email.dataType, "text");
+  assert.equal(email.maxLength, 255);
+  assert.equal(email.nullable, false);
+
+  assert.equal(column(users, "is_active").dataType, "boolean");
+  assert.equal(column(users, "balance").dataType, "decimal");
+  assert.equal(column(users, "created_at").dataType, "timestamp");
+  assert.equal(column(users, "ref").dataType, "uuid");
+  assert.equal(column(users, "ref").nullable, true);
+});
+
+test("sqlserver: GO batch separators split statements without semicolons", () => {
+  const s = load(
+    `
+    CREATE TABLE dbo.a ([id] INT IDENTITY PRIMARY KEY)
+    GO
+    CREATE TABLE dbo.b ([id] INT IDENTITY PRIMARY KEY)
+    GO
+    `,
+    "sqlserver",
+  );
+  assert.ok(s.tables.has("dbo.a"));
+  assert.ok(s.tables.has("dbo.b"));
+});
+
+test("sqlserver: CHECK (bracket/N'' and IN-list) carries over to the generator", () => {
+  const s = load(
+    `
+    CREATE TABLE dbo.t (
+      [status] NVARCHAR(20) NOT NULL CHECK ([status] IN (N'active', N'banned')),
+      [age]    INT CHECK ([age] >= 0 AND [age] < 150)
+    );
+    `,
+    "sqlserver",
+  );
+  const bounds = parseChecks(tbl(s, "dbo.t").checks);
+  assert.deepEqual(bounds.get("status")?.in, ["active", "banned"]);
+  assert.equal(bounds.get("age")?.min, 0);
+  assert.equal(bounds.get("age")?.max, 150);
+  assert.equal(bounds.get("age")?.maxExclusive, true);
+});
+
+test("sqlserver end-to-end: generates coherent, constraint-valid rows", () => {
+  const s = load(
+    `
+    CREATE TABLE dbo.users (
+      [id]    INT IDENTITY(1,1) NOT NULL,
+      [email] NVARCHAR(255) NOT NULL,
+      CONSTRAINT PK_users PRIMARY KEY ([id]),
+      CONSTRAINT UQ_email UNIQUE ([email])
+    );
+    CREATE TABLE dbo.orders (
+      [id]      INT IDENTITY(1,1) NOT NULL,
+      [user_id] INT NOT NULL,
+      [status]  NVARCHAR(20) NOT NULL CHECK ([status] IN (N'pending', N'paid')),
+      [total]   DECIMAL(10,2) NOT NULL CHECK ([total] >= 0),
+      CONSTRAINT PK_orders PRIMARY KEY ([id]),
+      CONSTRAINT FK_user FOREIGN KEY ([user_id]) REFERENCES dbo.users ([id])
+    );
+    `,
+    "sqlserver",
+  );
+  const { order, cyclic } = topoSort(s);
+  const data = buildData(s, order, cyclic, {
+    rows: { users: 5, orders: 20 },
+    seed: 11,
+  });
+
+  const userIds = new Set(
+    data.find((d) => d.table.key === "dbo.users")!.rows.map((r) => r.id),
+  );
+  assert.equal(userIds.size, 5);
+  const orders = data.find((d) => d.table.key === "dbo.orders")!.rows;
+  assert.equal(orders.length, 20);
+  for (const o of orders) {
+    assert.ok(userIds.has(o.user_id), "FK points at a real user");
+    assert.ok(
+      ["pending", "paid"].includes(o.status as string),
+      "enum in range",
+    );
+    assert.ok((o.total as number) >= 0, "CHECK bound honored");
+  }
+});
