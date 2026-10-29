@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] — 2026-10-28
+
+### Added
+
+- **Warn when a preserved join key is itself PII.** `--subset` copies join keys (primary keys, FK columns, and FK-referenced columns) to the target **verbatim** so referential integrity holds — but if such a key is personal data (the classic case: an email used as a primary key), its real values would reach staging unscrubbed. seedcoherent now runs every preserved key column through `classifyColumn` (`src/pii.ts`) and prints a stderr warning naming the leaky columns, their PII category, and the exact `--anonymize` invocation that would scrub them consistently across every join. It is **warn-only** — nothing is blocked or changed — and columns already named in `--anonymize` are excluded. New exported helper `privateKeyColumns(schema, config)` in `src/subset.ts`. (Roadmap item 3; auto-scrubbing such keys behind a flag is a deferred follow-on.)
+
 ## [0.24.0] — 2026-10-28
 
 ### Added

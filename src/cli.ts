@@ -40,7 +40,7 @@ import {
   buildSubsetPlan,
   formatPlan,
 } from "./plan.js";
-import { anonymizeAll, collectSubset } from "./subset.js";
+import { anonymizeAll, collectSubset, privateKeyColumns } from "./subset.js";
 import { buildProfile, formatProfileSummary, mergeProfile } from "./profile.js";
 import { resolveLocale } from "./locale.js";
 import { temporalWindow } from "./temporal.js";
@@ -396,6 +396,24 @@ program
 
       const batchSize: number | undefined = config.batchSize;
       const verb = isSubset ? "Subset" : isAppend ? "Appended" : "Generated";
+
+      // Warn (don't block) when a preserved join key is itself PII: keys are
+      // copied verbatim to keep joins valid, so its real values would leak.
+      if (isSubset) {
+        const leaky = privateKeyColumns(schema, config);
+        if (leaky.length > 0) {
+          console.error(
+            [
+              "⚠ These key columns look like PII and will be copied UNCHANGED",
+              "  (keys are preserved so joins stay valid):",
+              ...leaky.map((c) => `      ${c.table}.${c.column} (${c.category})`),
+              "  To scrub them consistently across every join, add:",
+              `      --anonymize ${leaky.map((c) => `${c.table}.${c.column}`).join(" ")}`,
+            ].join("\n"),
+          );
+        }
+      }
+
       const subsetData = async () =>
         anonymizeAll(
           schema,

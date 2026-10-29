@@ -539,7 +539,13 @@ npx seedcoherent $PROD_URL --subset orders=500 --dry-run --seed 42
 ### Per-column control
 
 The defaults are conservative — non-keys scrubbed, keys kept — but you can
-override either side per column:
+override either side per column.
+
+Because keys are copied verbatim, a key that is itself PII (an email used as a
+primary key, say) would reach the target unchanged. seedcoherent **warns** on
+stderr whenever a preserved key column looks like personal data, naming the
+columns and the `--anonymize` invocation that would scrub them consistently. It
+is warn-only — nothing is blocked or changed — so you stay in control:
 
 ```bash
 # A natural key that is itself PII (e.g. an email used as a primary key) is
