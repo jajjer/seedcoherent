@@ -586,8 +586,31 @@ npx seedcoherent $PROD_URL --subset orders=500 --sample --to $STAGING_URL
 `--sample` is a single switch that applies to **all** `--subset` root tables, and
 it composes with `--where` — the predicate filters first, then `n` rows are
 sampled at random from the matches. Only root selection changes; the upward FK
-closure still pulls referenced parents by exact key. The sample is
-**non-deterministic**: each run returns a different set of rows.
+closure still pulls referenced parents by exact key.
+
+By default the sample is **non-deterministic** — each run returns a different set
+of rows. Add `--seed <n>` to make it **reproducible**: the random order becomes a
+deterministic hash of the seed and each row's primary key (`md5`/`MD5`/`HASHBYTES`,
+and a registered `seedhash` function on SQLite), so the same seed re-draws the same
+rows on any engine. (A root table with no primary key can't be hashed, so its
+sample stays random even under `--seed`, with a one-line note.)
+
+**Per-table fractions (`--sample-rate`).** `--sample` draws each root's `--subset`
+count. To instead sample a **fraction** of a table's matching rows, use
+`--sample-rate <table>=<fraction>` (repeatable, `0 < f ≤ 1`):
+
+```bash
+# 10% of orders and 25% of events, drawn at random and reproducibly.
+npx seedcoherent $PROD_URL \
+  --subset orders=0 events=0 --sample-rate orders=0.1 events=0.25 \
+  --seed 42 --to $STAGING_URL
+```
+
+The fraction is applied to the rows that match (after any `--where`): the row count
+is `ceil(fraction × matches)`. A table named in `--sample-rate` is sampled whether
+or not the global `--sample` is set — so you can sample some roots and take others
+as the first N. It must still be listed in `--subset` (its count is ignored when a
+rate is given).
 
 ### Per-column control
 

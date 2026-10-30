@@ -44,6 +44,36 @@ test("fetchRoots splices a WHERE predicate before ORDER BY/LIMIT", async () => {
   assert.deepEqual(conn.calls[0].params, [25]);
 });
 
+test("fetchRoots uses RAND() when sampling without a seed", async () => {
+  const conn = new RecordingConn();
+  await new MysqlRowFetcher(conn).fetchRoots(users, 25, undefined, true);
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT * FROM `app`.`users` ORDER BY RAND() LIMIT ?",
+  );
+  assert.deepEqual(conn.calls[0].params, [25]);
+});
+
+test("fetchRoots hashes (seed ‖ PK) when sampling with a seed", async () => {
+  const conn = new RecordingConn();
+  await new MysqlRowFetcher(conn).fetchRoots(users, 25, undefined, true, 7);
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT * FROM `app`.`users` ORDER BY MD5(CONCAT_WS('|', ?, `id`)) LIMIT ?",
+  );
+  // Seed's `?` comes before the LIMIT `?`.
+  assert.deepEqual(conn.calls[0].params, ["7", 25]);
+});
+
+test("countRows counts matching rows with an optional WHERE", async () => {
+  const conn = new RecordingConn();
+  await new MysqlRowFetcher(conn).countRows(users, "total > 100");
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT COUNT(*) AS c FROM `app`.`users` WHERE total > 100",
+  );
+});
+
 test("fetchByKeys uses IN (?) for a single-column key", async () => {
   const conn = new RecordingConn();
   await new MysqlRowFetcher(conn).fetchByKeys(users, ["id"], [[1], [2], [3]]);

@@ -41,12 +41,16 @@ export interface RowFetcher {
    * root rows are selected before the ORDER BY … LIMIT. When `sample` is set
    * (from `--sample`), the stable primary-key order is replaced by a random
    * order, so the `limit` rows are a random sample rather than the first N.
+   * When `seed` is also given (from `--seed`), the random order becomes a
+   * deterministic hash of (seed ‖ primary key), so the same seed re-draws the
+   * same rows (see `sampleOrder`).
    */
   fetchRoots(
     table: TableInfo,
     limit: number,
     where?: string,
     sample?: boolean,
+    seed?: number,
   ): Promise<Row[]>;
   /** Rows whose `columns` tuple matches one of `keys` — for pulling parents. */
   fetchByKeys(
@@ -54,6 +58,11 @@ export interface RowFetcher {
     columns: string[],
     keys: unknown[][],
   ): Promise<Row[]>;
+  /**
+   * How many rows a root table has (optionally filtered by a `--where`
+   * predicate). Used by `--sample-rate` to turn a fraction into a row count.
+   */
+  countRows(table: TableInfo, where?: string): Promise<number>;
   /**
    * The largest value of an integer `column` currently in `table`, or `null` if
    * the table is empty. Used by append mode to continue a synthetic PK sequence
@@ -67,6 +76,38 @@ const KEY_CHUNK = 1000;
 const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
 const qual = (t: TableInfo) => `${ident(t.schema)}.${ident(t.name)}`;
 
+/** Which ordering a root-row fetch uses to select its `limit` rows. */
+export type SampleOrder = "pk" | "none" | "random" | "seeded";
+
+const unseedableWarned = new Set<string>();
+
+/**
+ * Decide how a root fetch orders rows before `LIMIT`. Without `--sample`, rows
+ * come in primary-key order (`pk`), or unordered (`none`) when the table has no
+ * PK. With `--sample` but no `--seed`, a native random order (`random`). With
+ * both, a deterministic hash of (seed ‖ primary key) (`seeded`) so the draw is
+ * reproducible — unless the table has no PK to hash, in which case it falls back
+ * to `random` and warns once. Each engine renders these four modes in its own
+ * SQL dialect.
+ */
+export function sampleOrder(
+  table: TableInfo,
+  sample: boolean,
+  seed: number | undefined,
+): SampleOrder {
+  if (!sample) return table.primaryKey.length ? "pk" : "none";
+  if (seed === undefined) return "random";
+  if (table.primaryKey.length) return "seeded";
+  if (!unseedableWarned.has(table.key)) {
+    unseedableWarned.add(table.key);
+    process.stderr.write(
+      `seedcoherent: --seed cannot make the --sample of "${table.name}" ` +
+        `reproducible (no primary key); using a random order.\n`,
+    );
+  }
+  return "random";
+}
+
 /** Live-Postgres implementation of RowFetcher. */
 export class PgRowFetcher implements RowFetcher {
   constructor(private client: Connection) {}
@@ -76,18 +117,40 @@ export class PgRowFetcher implements RowFetcher {
     limit: number,
     where?: string,
     sample?: boolean,
+    seed?: number,
   ): Promise<Row[]> {
     const filter = where ? ` WHERE ${where}` : "";
-    const order = sample
-      ? " ORDER BY random()"
-      : table.primaryKey.length
-        ? ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`
-        : "";
+    const params: unknown[] = [limit];
+    let order = "";
+    switch (sampleOrder(table, !!sample, seed)) {
+      case "pk":
+        order = ` ORDER BY ${table.primaryKey.map(ident).join(", ")}`;
+        break;
+      case "random":
+        order = " ORDER BY random()";
+        break;
+      case "seeded": {
+        params.push(String(seed));
+        const hashInput = table.primaryKey
+          .map((c) => `${ident(c)}::text`)
+          .join(" || '|' || ");
+        order = ` ORDER BY md5($${params.length} || '|' || ${hashInput})`;
+        break;
+      }
+    }
     const res = await this.client.query(
       `SELECT * FROM ${qual(table)}${filter}${order} LIMIT $1`,
-      [limit],
+      params,
     );
     return res.rows;
+  }
+
+  async countRows(table: TableInfo, where?: string): Promise<number> {
+    const filter = where ? ` WHERE ${where}` : "";
+    const res = await this.client.query(
+      `SELECT COUNT(*) AS c FROM ${qual(table)}${filter}`,
+    );
+    return toInt(res.rows[0]?.c) ?? 0;
   }
 
   async fetchByKeys(
@@ -177,6 +240,8 @@ export async function collectSubset(
   wheres: Record<string, string> = {},
   sample = false,
   children = false,
+  sampleRates: Record<string, number> = {},
+  seed?: number,
 ): Promise<Map<string, Row[]>> {
   // Reverse FK index: parentTableKey -> [{childTable, fk}] for downward traversal.
   const reverseIndex = new Map<
@@ -213,7 +278,20 @@ export async function collectSubset(
   for (const [spec, limit] of Object.entries(roots)) {
     const table = resolveTable(schema, spec);
     if (!table) throw new Error(`--subset: unknown table "${spec}"`);
-    add(table, await fetcher.fetchRoots(table, limit, wheres[spec], sample));
+    // A per-table --sample-rate overrides the fixed count: sample a fraction of
+    // the matching rows (and force sampling for this table).
+    const rate = sampleRates[spec];
+    let effLimit = limit;
+    let effSample = sample;
+    if (rate !== undefined) {
+      const total = await fetcher.countRows(table, wheres[spec]);
+      effLimit = Math.ceil(rate * total);
+      effSample = true;
+    }
+    add(
+      table,
+      await fetcher.fetchRoots(table, effLimit, wheres[spec], effSample, seed),
+    );
   }
 
   // BFS closure: upward (FK parents) and optionally downward (FK children).

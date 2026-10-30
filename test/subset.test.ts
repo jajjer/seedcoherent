@@ -24,6 +24,10 @@ import type { Connection, Schema, TableInfo } from "../src/types.js";
 class FakeFetcher implements RowFetcher {
   /** Records the `sample` flag passed to the most recent fetchRoots call. */
   lastSample?: boolean;
+  /** Records the `seed` passed to the most recent fetchRoots call. */
+  lastSeed?: number;
+  /** Records the `limit` passed to the most recent fetchRoots call. */
+  lastLimit?: number;
   constructor(
     private data: Record<string, Row[]>,
     private predicates: Record<string, (row: Row) => boolean> = {},
@@ -33,8 +37,11 @@ class FakeFetcher implements RowFetcher {
     limit: number,
     where?: string,
     sample?: boolean,
+    seed?: number,
   ): Promise<Row[]> {
     this.lastSample = sample;
+    this.lastSeed = seed;
+    this.lastLimit = limit;
     let rows = this.data[t.name] ?? [];
     if (where) {
       const pred = this.predicates[where];
@@ -42,6 +49,15 @@ class FakeFetcher implements RowFetcher {
       rows = rows.filter(pred);
     }
     return rows.slice(0, limit);
+  }
+  async countRows(t: TableInfo, where?: string): Promise<number> {
+    let rows = this.data[t.name] ?? [];
+    if (where) {
+      const pred = this.predicates[where];
+      if (!pred) throw new Error(`no fake predicate for "${where}"`);
+      rows = rows.filter(pred);
+    }
+    return rows.length;
   }
   async fetchByKeys(
     t: TableInfo,
@@ -225,6 +241,41 @@ test("--sample is forwarded to fetchRoots; default is false", async () => {
   assert.equal(sampled.lastSample, true);
 });
 
+test("--seed is forwarded to fetchRoots", async () => {
+  const s = shopSchema();
+  const f = new FakeFetcher(shopData());
+  await collectSubset(s, { users: 2 }, f, {}, true, false, {}, 42);
+  assert.equal(f.lastSeed, 42);
+});
+
+test("--sample-rate derives limit = ceil(rate*count) and forces sampling", async () => {
+  const s = shopSchema();
+  // 3 users; rate 0.5 → ceil(1.5) = 2 rows, sampled.
+  const f = new FakeFetcher(shopData());
+  await collectSubset(s, { users: 0 }, f, {}, false, false, { users: 0.5 });
+  assert.equal(f.lastLimit, 2);
+  assert.equal(f.lastSample, true);
+});
+
+test("--sample-rate counts after --where, not before", async () => {
+  const s = shopSchema();
+  // Only user 1's 2 orders match; rate 0.5 → ceil(1.0) = 1.
+  const f = new FakeFetcher(shopData(), {
+    "user_id = 1": (r) => r.user_id === 1,
+  });
+  await collectSubset(
+    s,
+    { orders: 0 },
+    f,
+    { orders: "user_id = 1" },
+    false,
+    false,
+    { orders: 0.5 },
+  );
+  assert.equal(f.lastLimit, 1);
+  assert.equal(f.lastSample, true);
+});
+
 test("PgRowFetcher.fetchRoots uses ORDER BY random() when sampling", async () => {
   const calls: { sql: string; params?: unknown[] }[] = [];
   const client: Connection = {
@@ -244,6 +295,49 @@ test("PgRowFetcher.fetchRoots uses ORDER BY random() when sampling", async () =>
     'SELECT * FROM "public"."users" WHERE tenant_id = 42 ORDER BY random() LIMIT $1',
   );
   assert.deepEqual(calls[0].params, [25]);
+});
+
+test("PgRowFetcher.fetchRoots hashes (seed ‖ PK) when sampling with a seed", async () => {
+  const calls: { sql: string; params?: unknown[] }[] = [];
+  const client: Connection = {
+    async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return { rows: [] as T[] };
+    },
+    async end() {},
+  };
+  const users = table("users", {
+    columns: [idCol(), col("tenant_id", { udtName: "int4" })],
+    primaryKey: ["id"],
+  });
+  await new PgRowFetcher(client).fetchRoots(users, 25, undefined, true, 7);
+  assert.equal(
+    calls[0].sql,
+    `SELECT * FROM "public"."users" ORDER BY md5($2 || '|' || "id"::text) LIMIT $1`,
+  );
+  // Seed is bound as text param $2; limit stays $1.
+  assert.deepEqual(calls[0].params, [25, "7"]);
+});
+
+test("PgRowFetcher.countRows counts matching rows, with WHERE", async () => {
+  const calls: { sql: string; params?: unknown[] }[] = [];
+  const client: Connection = {
+    async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return { rows: [{ c: 3 }] as T[] };
+    },
+    async end() {},
+  };
+  const users = table("users", {
+    columns: [idCol()],
+    primaryKey: ["id"],
+  });
+  const f = new PgRowFetcher(client);
+  assert.equal(await f.countRows(users, "tenant_id = 42"), 3);
+  assert.equal(
+    calls[0].sql,
+    'SELECT COUNT(*) AS c FROM "public"."users" WHERE tenant_id = 42',
+  );
 });
 
 test("PgRowFetcher.fetchRoots splices WHERE before ORDER BY/LIMIT", async () => {
