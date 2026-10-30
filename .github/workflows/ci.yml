@@ -36,6 +36,23 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Str0ng!Passw0rd"
+        ports:
+          - 1433:1433
+        # The mssql image ships no HEALTHCHECK; poll with sqlcmd until it answers.
+        # SQL Server boots slower and needs more RAM than pg/mysql, hence the long
+        # start-period and retry budget.
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Str0ng!Passw0rd' -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 30s
+
     steps:
       - uses: actions/checkout@v4
 
@@ -56,10 +73,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Both DATABASE_URL and MYSQL_URL are set, so the opt-in Postgres and
-      # MySQL integration tests run too.
+      # DATABASE_URL, MYSQL_URL and MSSQL_URL are all set, so the opt-in Postgres,
+      # MySQL and SQL Server integration tests run too.
       - name: Test
         run: npm test
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           MYSQL_URL: mysql://root:root@127.0.0.1:3306/
+          MSSQL_URL: sqlserver://sa:Str0ng!Passw0rd@localhost:1433/master?encrypt=false&trustServerCertificate=true
