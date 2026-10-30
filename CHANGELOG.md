@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] — 2026-10-30
+
+### Added
+
+- **`--demo`: a no-database quickstart.** `npx seedcoherent --demo` runs the full generate path against a **bundled** example schema and prints coherent, referentially-correct sample rows to stdout — no connection string, no `-o`, no flags. It removes the first-run cost ("have a database with a schema ready") that filtered out anyone evaluating the tool in 30 seconds. The schema is a small e-commerce shape (a self-referential `categories` tree, `users`, `products`, `orders`, `order_items`) with foreign keys, a `UNIQUE`, and `CHECK`-based enums — enough to show referential coherence. Implementation is a thin pre-processor over the existing offline (`--schema-file`) path: `--demo` satisfies the offline branch so no connection is required, feeds `runOffline` the bundled `DEMO_SCHEMA_DDL` (new `src/demo.ts`, kept in sync with `examples/demo-sqlite.sql` — it lives in `src/` as a string because only `dist/` is published), defaults the dialect to SQLite, and prints `formatPlan`'s sample-rows view to **stdout** (where `--dry-run` prints the same plan to stderr). It rejects a connection string, `--schema-file`, and the write-mode flags the offline path already rejects. (Growth item #41.)
+
 ## [0.31.0] — 2026-10-29
 
 ### Added
