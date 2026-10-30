@@ -275,6 +275,7 @@ Sample rows:
 | `--sample` | Subset: pick root rows at random instead of the first N by primary key (see below) |
 | `--to <connection>` | Target DB to insert the anonymized subset into |
 | `--anonymize <col...>` | Also scrub these join keys (see below) |
+| `--scrub-keys` | Auto-anonymize key columns that look like PII (see below) |
 | `--preserve <col...>` | Keep these columns' real values (see below) |
 | `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
 | `--scan` | Print a per-column privacy report and exit without copying (see below) |
@@ -605,6 +606,14 @@ is warn-only — nothing is blocked or changed — so you stay in control:
 # key that references it is remapped to match, so joins still resolve.
 npx seedcoherent $PROD_URL --subset sessions=500 --to $STAGING_URL \
   --anonymize accounts.email
+
+# --scrub-keys does exactly what the warning suggests, automatically: it folds
+# every PII key column the warning would name into --anonymize, so you don't
+# have to list them by hand. Pair it with --secret so the same real value maps
+# to the same fake across *separate* extracts (within one run the group remap is
+# already consistent on its own).
+npx seedcoherent $PROD_URL --subset sessions=500 --to $STAGING_URL \
+  --scrub-keys --secret "$ANON_KEY"
 
 # Keep a non-key column's real values (e.g. so staging keeps a realistic
 # country/plan distribution).

@@ -47,6 +47,7 @@ import {
   formatScanReport,
   privateKeyColumns,
   scanSubset,
+  scrubKeysConfig,
 } from "./subset.js";
 import { buildProfile, formatProfileSummary, mergeProfile } from "./profile.js";
 import { resolveLocale } from "./locale.js";
@@ -191,6 +192,10 @@ program
   .option(
     "--secret <key>",
     "subset: HMAC key for deterministic anonymization — same secret produces same fakes across runs",
+  )
+  .option(
+    "--scrub-keys",
+    "subset: automatically anonymize key columns that look like PII (what the leak warning suggests), remapped consistently across joins",
   )
   .option(
     "--scan",
@@ -357,6 +362,11 @@ program
           "--children pulls child rows referencing the subset; pass --subset <spec...> too.",
         );
       }
+      if (opts.scrubKeys && !isSubset) {
+        program.error(
+          "--scrub-keys anonymizes PII key columns in a subset; pass --subset <spec...> too.",
+        );
+      }
       const wheres = parseWhereSpecs(opts.where);
       if (Object.keys(wheres).length > 0) {
         if (!isSubset) {
@@ -458,6 +468,15 @@ program
 
       const batchSize: number | undefined = config.batchSize;
       const verb = isSubset ? "Subset" : isAppend ? "Appended" : "Generated";
+
+      // --scrub-keys: fold the PII key columns the leak warning would name into
+      // the effective anonymize set. Done before --scan and the warning so both
+      // reflect it; the group-remap path in anonymizeAll then scrubs each join
+      // key consistently (FKs still resolve), and privateKeyColumns — which
+      // excludes forced columns — comes back empty so the warning self-suppresses.
+      if (isSubset && opts.scrubKeys) {
+        config.anonymize = scrubKeysConfig(schema, config).anonymize;
+      }
 
       // --scan: a schema-level privacy report. Introspection already ran (the
       // only source access scan needs); classify every column and exit without
