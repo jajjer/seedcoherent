@@ -11,6 +11,7 @@ import {
   parseLinkGroups,
   parseNullRateSpecs,
   parseRowSpecs,
+  parseSampleRateSpecs,
   parseWhereSpecs,
   validateNullRates,
 } from "../src/config.js";
@@ -51,6 +52,28 @@ test("parseWhereSpecs rejects specs without '=', empty table, or empty predicate
   assert.throws(() => parseWhereSpecs(["orders"]), /expected table=predicate/);
   assert.throws(() => parseWhereSpecs(["=total > 1"]), /empty table/);
   assert.throws(() => parseWhereSpecs(["orders="]), /empty predicate/);
+});
+
+test("parseSampleRateSpecs parses table=fraction pairs", () => {
+  assert.deepEqual(parseSampleRateSpecs(["orders=0.1", "events=0.25"]), {
+    orders: 0.1,
+    events: 0.25,
+  });
+});
+
+test("parseSampleRateSpecs accepts the boundary 1 but rejects 0 and >1", () => {
+  assert.deepEqual(parseSampleRateSpecs(["orders=1"]), { orders: 1 });
+  assert.throws(() => parseSampleRateSpecs(["orders=0"]), /need a number/);
+  assert.throws(() => parseSampleRateSpecs(["orders=1.5"]), /need a number/);
+});
+
+test("parseSampleRateSpecs rejects specs without '=', empty table, or non-numeric", () => {
+  assert.throws(
+    () => parseSampleRateSpecs(["orders"]),
+    /expected table=fraction/,
+  );
+  assert.throws(() => parseSampleRateSpecs(["=0.1"]), /empty table/);
+  assert.throws(() => parseSampleRateSpecs(["orders=abc"]), /need a number/);
 });
 
 test("parseRowSpecs rejects non-numeric or negative counts", () => {

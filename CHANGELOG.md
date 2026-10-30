@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] — 2026-10-29
+
+### Added
+
+- **Reproducible `--sample` under `--seed`, and `--sample-rate` for per-table fractions.** Closes the two follow-ons v0.28.0 deferred when it added `--sample`. (1) `--sample` was non-deterministic; passing `--seed <n>` now makes the random draw **reproducible** across runs and engines. A new shared `sampleOrder(table, sample, seed)` helper (`src/subset.ts`) decides the root-selection ordering, and each engine renders its `seeded` mode as a deterministic hash of the seed concatenated with the row's primary key — Postgres `md5(…)`, MySQL `MD5(CONCAT_WS(…))`, SQL Server `HASHBYTES('MD5', CONCAT_WS(…))`, and SQLite a registered deterministic `seedhash` UDF (SQLite's `RANDOM()` takes no seed). A root table with no primary key can't be hashed, so its sample stays random even under `--seed`, with a one-time stderr note. The seed is threaded from `config.seed` through `collectSubset` into `RowFetcher.fetchRoots` (new optional `seed` arg). (2) New repeatable `--sample-rate <table>=<fraction>` flag (`0 < f ≤ 1`, parsed by `parseSampleRateSpecs` in `src/config.ts`) samples a **fraction** of a root's matching rows instead of the fixed `--subset` count: `collectSubset` calls a new `RowFetcher.countRows` and seeds `ceil(fraction × matches)` rows, forcing sampling for just that table. It composes with `--where` (fraction applies after filtering) and `--seed`, and lets you sample some roots while taking others as the first N. Like `--where`, a rated table must still be named in `--subset` (its count is then ignored). (Roadmap item 6 follow-ons; only per-table *counts* — already expressible via `--subset` + `--sample` — are not a new flag.)
+
 ## [0.30.0] — 2026-10-29
 
 ### Added

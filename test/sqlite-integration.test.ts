@@ -304,3 +304,57 @@ test("subset + anonymize pulls a referentially-complete slice into a target DB",
   src.close();
   target.close();
 });
+
+test("--sample-rate + --seed draws a reproducible slice; a new seed differs", async () => {
+  const src = new Database(":memory:");
+  src.exec(SCHEMA_DDL);
+  // 10 users so a 50% sample has room to vary between seeds.
+  const values = Array.from({ length: 10 }, (_, i) => {
+    const id = i + 1;
+    return `(${id},'u${id}@x.com','User ${id}','member','2025-01-01T00:00:00Z')`;
+  }).join(",");
+  src.exec(
+    `INSERT INTO users (id, email, full_name, role, created_at) VALUES ${values};`,
+  );
+  // Connection exposes its raw handle so the fetcher can register the seedhash UDF.
+  const conn: Connection & { db: Database.Database } = {
+    db: src,
+    async query<T = any>(sql: string, params?: unknown[]) {
+      const stmt = src.prepare(sql);
+      const args = (params ?? []) as unknown[];
+      return {
+        rows: (stmt.reader
+          ? stmt.all(...args)
+          : (stmt.run(...args), [])) as T[],
+      };
+    },
+    async end() {},
+  };
+
+  const schema = await introspectSqlite(conn, ["main"]);
+  const ids = async (seed: number) => {
+    const sel = await collectSubset(
+      schema,
+      { users: 0 },
+      new SqliteRowFetcher(conn),
+      {},
+      false,
+      false,
+      { users: 0.5 }, // ceil(0.5 * 10) = 5 rows
+      seed,
+    );
+    // users has no FKs, so the slice is just the sampled users bucket.
+    return ([...sel.values()][0] ?? [])
+      .map((r) => Number(r.id))
+      .sort((a, b) => a - b);
+  };
+
+  const a = await ids(123);
+  const b = await ids(123);
+  const c = await ids(456);
+  assert.equal(a.length, 5);
+  assert.deepEqual(a, b, "same seed → identical sample");
+  assert.notDeepEqual(a, c, "different seed → different sample");
+
+  src.close();
+});

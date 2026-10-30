@@ -44,6 +44,35 @@ test("fetchRoots splices a WHERE predicate before ORDER BY", async () => {
   assert.deepEqual(conn.calls[0].params, [25]);
 });
 
+test("fetchRoots uses NEWID() when sampling without a seed", async () => {
+  const conn = new RecordingConn();
+  await new MssqlRowFetcher(conn).fetchRoots(users, 25, undefined, true);
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT TOP (@p1) * FROM [dbo].[users] ORDER BY NEWID()",
+  );
+  assert.deepEqual(conn.calls[0].params, [25]);
+});
+
+test("fetchRoots hashes (seed ‖ PK) when sampling with a seed", async () => {
+  const conn = new RecordingConn();
+  await new MssqlRowFetcher(conn).fetchRoots(users, 25, undefined, true, 7);
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT TOP (@p1) * FROM [dbo].[users] ORDER BY HASHBYTES('MD5', CONCAT_WS('|', @p2, [id]))",
+  );
+  assert.deepEqual(conn.calls[0].params, [25, "7"]);
+});
+
+test("countRows counts matching rows with an optional WHERE", async () => {
+  const conn = new RecordingConn();
+  await new MssqlRowFetcher(conn).countRows(users, "total > 100");
+  assert.equal(
+    conn.calls[0].sql,
+    "SELECT COUNT(*) AS c FROM [dbo].[users] WHERE total > 100",
+  );
+});
+
 test("fetchByKeys uses IN (@p...) for a single-column key", async () => {
   const conn = new RecordingConn();
   await new MssqlRowFetcher(conn).fetchByKeys(users, ["id"], [[1], [2], [3]]);

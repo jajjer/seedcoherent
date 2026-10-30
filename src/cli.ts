@@ -10,6 +10,7 @@ import {
   parseLinkGroups,
   parseNullRateSpecs,
   parseRowSpecs,
+  parseSampleRateSpecs,
   parseWhereSpecs,
   validateNullRates,
 } from "./config.js";
@@ -168,7 +169,12 @@ program
   )
   .option(
     "--sample",
-    "subset: pick root rows at random instead of the first N by primary key",
+    "subset: pick root rows at random instead of the first N by primary key (reproducible when --seed is set)",
+  )
+  .option(
+    "--sample-rate <spec...>",
+    "subset: sample a fraction of a root's matching rows instead of a fixed count, e.g. orders=0.1 (table must be a --subset root; implies --sample for it)",
+    [],
   )
   .option(
     "--children",
@@ -383,6 +389,22 @@ program
           }
         }
       }
+      const sampleRates = parseSampleRateSpecs(opts.sampleRate);
+      if (Object.keys(sampleRates).length > 0) {
+        if (!isSubset) {
+          program.error(
+            "--sample-rate samples --subset root rows; pass --subset <spec...> too.",
+          );
+        }
+        const rootTables = new Set(Object.keys(parseRowSpecs(opts.subset)));
+        for (const table of Object.keys(sampleRates)) {
+          if (!rootTables.has(table)) {
+            program.error(
+              `--sample-rate table "${table}" is not a --subset root; --sample-rate only samples root tables.`,
+            );
+          }
+        }
+      }
 
       // Profiling learns the shape of the existing data and folds it into the
       // config *beneath* the user's explicit flags. --profile-out dumps that
@@ -522,6 +544,8 @@ program
             wheres,
             !!opts.sample,
             !!opts.children,
+            sampleRates,
+            config.seed,
           ),
           config,
         );
