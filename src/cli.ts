@@ -26,6 +26,7 @@ import {
   writeTableFiles,
 } from "./dataformat.js";
 import { loadSchemaFromDdl } from "./schema-file.js";
+import { DEMO_SCHEMA_DDL, DEMO_SCHEMA_DIALECT } from "./demo.js";
 import { appendTargets, planAppend } from "./append.js";
 import {
   buildData,
@@ -152,6 +153,10 @@ program
     "preview the plan (table order, row counts, sample rows) without writing",
   )
   .option(
+    "--demo",
+    "generate and print sample rows from a bundled example schema — no database or flags required",
+  )
+  .option(
     "--append",
     "add rows to a database that already has data: only --rows tables are grown, their FKs reference existing rows, and synthetic ids continue past the current max",
   )
@@ -212,8 +217,15 @@ program
     "with --scan: emit the privacy report as JSON instead of a table",
   )
   .action(async (connection, opts) => {
-    const offline = !!opts.schemaFile;
+    // --demo runs the offline path against a bundled schema, so it needs no
+    // connection string (and rejects one, below) just like --schema-file.
+    const offline = !!opts.schemaFile || !!opts.demo;
     const connStr = connection ?? process.env.DATABASE_URL;
+    if (opts.demo && connStr) {
+      program.error(
+        "--demo runs against a bundled example schema; it takes no connection string or DATABASE_URL.",
+      );
+    }
     if (!connStr && !offline) {
       program.error(
         "No connection string. Pass one as an argument or set DATABASE_URL.",
@@ -676,20 +688,30 @@ async function runOffline(
     program.error(
       "--truncate needs a live database; it has no effect with --schema-file.",
     );
+  if (opts.demo && opts.schemaFile)
+    program.error(
+      "--demo uses a bundled schema; it can't be combined with --schema-file.",
+    );
 
-  // `--dialect` picks the engine for schema-file mode: it selects both the DDL
-  // grammar to parse and the SQL flavor to emit. `--schema-dialect` overrides the
-  // input grammar alone, for the rarer case of translating one engine's schema
-  // into another's seed SQL (e.g. read Postgres DDL, emit MySQL).
+  // --demo feeds the bundled example schema through this same path, so it needs
+  // no --schema-file and defaults the dialect to SQLite (the grammar the bundled
+  // DDL is written in). Otherwise `--dialect` picks the engine for schema-file
+  // mode: it selects both the DDL grammar to parse and the SQL flavor to emit.
+  // `--schema-dialect` overrides the input grammar alone, for the rarer case of
+  // translating one engine's schema into another's seed SQL.
+  const defaultDialect: DialectName = opts.demo
+    ? DEMO_SCHEMA_DIALECT
+    : "postgres";
   const outputDialect: DialectName = (opts.dialect ??
-    "postgres") as DialectName;
+    defaultDialect) as DialectName;
   if (!["postgres", "mysql", "sqlite", "sqlserver"].includes(outputDialect)) {
     program.error(
       `Unknown --dialect '${opts.dialect}'. Use postgres, mysql, sqlite, or sqlserver.`,
     );
   }
-  const schemaDialect: DialectName = (opts.schemaDialect ??
-    outputDialect) as DialectName;
+  const schemaDialect: DialectName = opts.demo
+    ? DEMO_SCHEMA_DIALECT
+    : ((opts.schemaDialect ?? outputDialect) as DialectName);
   if (!["postgres", "mysql", "sqlite", "sqlserver"].includes(schemaDialect)) {
     program.error(
       `Unknown --schema-dialect '${opts.schemaDialect}'. Use postgres, mysql, sqlite, or sqlserver.`,
@@ -698,17 +720,25 @@ async function runOffline(
   const dialect = dialectByName(outputDialect);
 
   let ddl: string;
-  try {
-    ddl = await readFile(opts.schemaFile, "utf8");
-  } catch (err) {
-    return program.error(
-      `Can't read --schema-file ${opts.schemaFile}: ${err instanceof Error ? err.message : err}`,
-    );
+  if (opts.demo) {
+    ddl = DEMO_SCHEMA_DDL;
+  } else {
+    try {
+      ddl = await readFile(opts.schemaFile, "utf8");
+    } catch (err) {
+      return program.error(
+        `Can't read --schema-file ${opts.schemaFile}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   const schema = loadSchemaFromDdl(ddl, schemaDialect);
   if (schema.tables.size === 0) {
-    program.error(`No CREATE TABLE statements found in ${opts.schemaFile}.`);
+    program.error(
+      opts.demo
+        ? "No CREATE TABLE statements found in the bundled demo schema."
+        : `No CREATE TABLE statements found in ${opts.schemaFile}.`,
+    );
   }
   const { order, cyclic } = topoSort(schema);
 
@@ -737,6 +767,20 @@ async function runOffline(
         "(a faker path or values:a,b,c work too), or make the column nullable / give it a DB default.",
       ].join("\n"),
     );
+  }
+
+  // --demo is self-contained: print an intro plus the sample-rows plan to
+  // stdout (so it pipes cleanly and reads as the product) and stop — no file,
+  // no database. --dry-run prints the same plan but to stderr.
+  if (opts.demo) {
+    console.log(
+      "seedcoherent --demo · generated from a bundled e-commerce schema (users, orders, products — no database).\n",
+    );
+    console.log(formatPlan(buildPlan(schema, order, cyclic, config)));
+    console.log(
+      "\nThat's synthetic data with foreign keys resolved and constraints held. Point it at your own schema with --schema-file <file> or a connection string.",
+    );
+    return;
   }
 
   if (opts.dryRun) {

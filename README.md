@@ -17,6 +17,17 @@ npx seedcoherent ./mydb.sqlite --rows users=1000 orders=5000
 npx seedcoherent 'sqlserver://sa:pass@localhost:1433/mydb' --rows users=1000 orders=5000
 ```
 
+**No database handy? Try it in 30 seconds:**
+
+```bash
+npx seedcoherent --demo
+```
+
+`--demo` runs the full generate path against a bundled example schema (users,
+orders, products, and more — with foreign keys, a `UNIQUE`, and `CHECK`-based
+enums) and prints coherent, referentially-correct sample rows. No connection
+string, no flags, nothing to install first.
+
 The database is picked from the connection string: a `postgres://` /
 `postgresql://` or `mysql://` scheme selects that engine, a `sqlserver://` /
 `mssql://` scheme selects SQL Server, while a `sqlite:` / `file:` URL, a
