@@ -22,6 +22,8 @@ import {
 } from "../src/sqlserver-emit.js";
 import { topoSort } from "../src/graph.js";
 import { buildData, generateInto } from "../src/generate.js";
+import { anonymizeAll, collectSubset } from "../src/subset.js";
+import { MssqlRowFetcher } from "../src/sqlserver-subset.js";
 import type { Connection } from "../src/types.js";
 
 const url = process.env.MSSQL_URL;
@@ -61,6 +63,37 @@ const DDL = `
   );
 `;
 
+// A second schema for the subset/anonymize tests. It mirrors the users → orders →
+// order_items FK chain (including a composite PK) but uses plain BIGINT PKs instead
+// of IDENTITY, so the tests can seed known ids with ordinary INSERTs and re-insert a
+// subset slice back into the (truncated) same schema without IDENTITY_INSERT.
+const SUB = "sc_sub";
+
+const SUB_DROP = `
+  IF OBJECT_ID('${SUB}.order_items','U') IS NOT NULL DROP TABLE ${SUB}.order_items;
+  IF OBJECT_ID('${SUB}.orders','U') IS NOT NULL DROP TABLE ${SUB}.orders;
+  IF OBJECT_ID('${SUB}.users','U') IS NOT NULL DROP TABLE ${SUB}.users;
+`;
+
+const SUB_DDL = `
+  CREATE TABLE ${SUB}.users (
+    id         BIGINT NOT NULL PRIMARY KEY,
+    email      NVARCHAR(255) NOT NULL UNIQUE,
+    full_name  NVARCHAR(255) NOT NULL
+  );
+  CREATE TABLE ${SUB}.orders (
+    id      BIGINT NOT NULL PRIMARY KEY,
+    user_id BIGINT NOT NULL CONSTRAINT fk_sub_orders_user REFERENCES ${SUB}.users(id),
+    status  NVARCHAR(20) NOT NULL
+  );
+  CREATE TABLE ${SUB}.order_items (
+    order_id BIGINT NOT NULL CONSTRAINT fk_sub_items_order REFERENCES ${SUB}.orders(id),
+    line_no  INT NOT NULL,
+    quantity INT NOT NULL,
+    CONSTRAINT pk_sub_items PRIMARY KEY (order_id, line_no)
+  );
+`;
+
 before(async () => {
   if (!enabled) return;
   pool = await new mssql.ConnectionPool(mssqlConfig(url!)).connect();
@@ -78,10 +111,17 @@ before(async () => {
     .request()
     .batch(`IF SCHEMA_ID('${SCHEMA}') IS NULL EXEC('CREATE SCHEMA ${SCHEMA}')`);
   await pool.request().batch(DDL);
+
+  await pool.request().batch(SUB_DROP);
+  await pool
+    .request()
+    .batch(`IF SCHEMA_ID('${SUB}') IS NULL EXEC('CREATE SCHEMA ${SUB}')`);
+  await pool.request().batch(SUB_DDL);
 });
 
 after(async () => {
   if (!enabled || !pool) return;
+  await pool.request().batch(SUB_DROP);
   await pool.request().batch(DROP);
   await pool.close();
 });
@@ -93,6 +133,33 @@ async function clear() {
   await conn.query(`DELETE FROM ${SCHEMA}.order_items`);
   await conn.query(`DELETE FROM ${SCHEMA}.orders`);
   await conn.query(`DELETE FROM ${SCHEMA}.users`);
+}
+
+/**
+ * Seed the subset schema with a known, deterministic graph: 10 users, 6 orders
+ * (users 1 and 2 own orders 100-102; users 3-5 own 103-105), and order_items
+ * hanging off them. Child-first delete keeps the FKs happy on re-seed.
+ */
+async function seedSub() {
+  await conn.query(`DELETE FROM ${SUB}.order_items`);
+  await conn.query(`DELETE FROM ${SUB}.orders`);
+  await conn.query(`DELETE FROM ${SUB}.users`);
+  const users = Array.from(
+    { length: 10 },
+    (_, i) => `(${i + 1}, 'u${i + 1}@x.com', 'User ${i + 1}')`,
+  ).join(",");
+  await conn.query(
+    `INSERT INTO ${SUB}.users (id, email, full_name) VALUES ${users}`,
+  );
+  await conn.query(
+    `INSERT INTO ${SUB}.orders (id, user_id, status) VALUES
+      (100,1,'paid'),(101,1,'pending'),(102,2,'paid'),
+      (103,3,'shipped'),(104,4,'paid'),(105,5,'pending')`,
+  );
+  await conn.query(
+    `INSERT INTO ${SUB}.order_items (order_id, line_no, quantity) VALUES
+      (100,1,2),(100,2,1),(101,1,5),(102,1,3),(103,1,4),(104,1,1),(105,1,2)`,
+  );
 }
 
 /** Assert the DB holds referentially-correct, constraint-valid rows. */
@@ -238,5 +305,120 @@ test(
     await clear();
     await pool.request().batch(toSqlMssql(data));
     await assertValid(15, 40, 90);
+  },
+);
+
+test(
+  "subset + anonymize pulls a referentially-complete slice and re-inserts it",
+  { skip: !enabled },
+  async () => {
+    await seedSub();
+    const schema = await introspectMssql(conn, [SUB]);
+    const { order } = topoSort(schema);
+    const origEmails = (
+      await conn.query<{ email: string }>(`SELECT email FROM ${SUB}.users`)
+    ).rows.map((r) => r.email);
+
+    // TOP (2) ORDER BY the composite PK pulls order_items (100,1) and (100,2),
+    // which drag in order 100 and its owner, user 1.
+    const selected = await collectSubset(
+      schema,
+      { [`${SUB}.order_items`]: 2 },
+      new MssqlRowFetcher(conn),
+    );
+    const data = anonymizeAll(schema, order, selected, { seed: 1 });
+
+    // Re-insert the anonymized slice into the (truncated) same schema.
+    const inserted = await insertDataMssql(conn, data, { truncate: true });
+    assert.ok(inserted > 0);
+
+    // The slice stands alone: every FK still resolves across the simple and the
+    // composite FK, and only the two seeded items survive.
+    assert.equal(await count(`SELECT count(*) n FROM ${SUB}.order_items`), 2);
+    assert.equal(
+      await count(
+        `SELECT count(*) n FROM ${SUB}.order_items i LEFT JOIN ${SUB}.orders o ON o.id=i.order_id WHERE o.id IS NULL`,
+      ),
+      0,
+    );
+    assert.equal(
+      await count(
+        `SELECT count(*) n FROM ${SUB}.orders o LEFT JOIN ${SUB}.users u ON u.id=o.user_id WHERE u.id IS NULL`,
+      ),
+      0,
+    );
+
+    // Email PII was scrubbed: no surviving address matches an original.
+    const newEmails = (
+      await conn.query<{ email: string }>(`SELECT email FROM ${SUB}.users`)
+    ).rows.map((r) => r.email);
+    assert.ok(newEmails.length > 0);
+    assert.ok(newEmails.every((e) => !origEmails.includes(e)));
+  },
+);
+
+test(
+  "--children traverses FKs downward from root users",
+  { skip: !enabled },
+  async () => {
+    await seedSub();
+    const schema = await introspectMssql(conn, [SUB]);
+    // Roots: TOP (2) ORDER BY id → users 1 and 2. children=true walks downward.
+    const selected = await collectSubset(
+      schema,
+      { [`${SUB}.users`]: 2 },
+      new MssqlRowFetcher(conn),
+      {},
+      false,
+      true,
+    );
+
+    const userIds = (selected.get(`${SUB}.users`) ?? [])
+      .map((r) => Number(r.id))
+      .sort((a, b) => a - b);
+    const orderIds = (selected.get(`${SUB}.orders`) ?? [])
+      .map((r) => Number(r.id))
+      .sort((a, b) => a - b);
+    const itemKeys = (selected.get(`${SUB}.order_items`) ?? [])
+      .map((r) => `${r.order_id}:${r.line_no}`)
+      .sort();
+
+    assert.deepEqual(userIds, [1, 2]);
+    // Only orders owned by users 1 and 2 — never 103-105, owned by users 3-5.
+    assert.deepEqual(orderIds, [100, 101, 102]);
+    // Their order_items came along; none from the excluded orders.
+    assert.deepEqual(itemKeys, ["100:1", "100:2", "101:1", "102:1"]);
+  },
+);
+
+test(
+  "--sample-rate + --seed draws a reproducible user slice; a new seed differs",
+  { skip: !enabled },
+  async () => {
+    await seedSub();
+    const schema = await introspectMssql(conn, [SUB]);
+    // users has no FKs, so the slice is just the sampled users bucket.
+    const ids = async (seed: number) => {
+      const sel = await collectSubset(
+        schema,
+        { [`${SUB}.users`]: 0 },
+        new MssqlRowFetcher(conn),
+        {},
+        false,
+        false,
+        { [`${SUB}.users`]: 0.5 }, // ceil(0.5 * 10) = 5 rows
+        seed,
+      );
+      return (sel.get(`${SUB}.users`) ?? [])
+        .map((r) => Number(r.id))
+        .sort((a, b) => a - b);
+    };
+
+    const a = await ids(123);
+    const b = await ids(123);
+    const c = await ids(456);
+    assert.equal(a.length, 5);
+    assert.deepEqual(a, b, "same seed → identical sample");
+    assert.notDeepEqual(a, c, "different seed → different sample");
   },
 );
