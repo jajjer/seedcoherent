@@ -4,6 +4,18 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] — 2026-10-29
+
+### Added
+
+- **`--scrub-keys`: automatically anonymize key columns that look like PII.** Since v0.25.0, when a column that `--subset` copies **verbatim** to keep joins valid (a primary key, FK column, or FK-referenced column) is itself personal data — the classic case being an email used as a primary key — seedcoherent prints a stderr warning naming the leaky columns and the exact `--anonymize` invocation that would scrub them. `--scrub-keys` does that for you: before copying (and before `--scan`), it folds every column `privateKeyColumns` would name into the effective `--anonymize` set, so the existing group-remap path in `anonymizeAll` scrubs each join key consistently — every table holding the value maps it to the same fake, so foreign keys still resolve. Because the leaky columns are now forced, the warning self-suppresses and `--scan` reports them as `scrub` instead of a verbatim `key`/`⚠`. Within a single run the remap is already consistent on its own; pair `--scrub-keys` with `--secret` so the same real value maps to the same fake across **separate** extracts. Pure CLI wiring over existing behavior — `privateKeyColumns`, `anonymizeAll`, and all four engine adapters are untouched. (Completes the v0.25.0 deferred follow-on.)
+
+## [0.29.0] — 2026-10-29
+
+### Added
+
+- **`--children`: pull child rows via downward FK traversal.** By default `--subset` walks the FK graph **upward** — each collected row drags in the parent rows it references, so the slice stays referentially complete. `--children` adds the opposite direction: `collectSubset` builds a reverse FK index at startup and, for every collected row, also pulls the rows that reference it, running a full bidirectional BFS (upward parents + downward children) until a deduplication fixpoint. Useful when you want a root row *and* everything hanging off it (an account and all its orders, events, and sessions) rather than just its ancestors. No change to the `RowFetcher` interface or any per-engine implementation — `fetchByKeys` already works in both directions.
+
 ## [0.28.0] — 2026-10-29
 
 ### Added

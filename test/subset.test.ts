@@ -9,6 +9,8 @@ import {
   collectSubset,
   PgRowFetcher,
   privateKeyColumns,
+  scanSubset,
+  scrubKeysConfig,
   type RowFetcher,
 } from "../src/subset.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
@@ -715,6 +717,103 @@ test("privateKeyColumns excludes keys opted into --anonymize", () => {
     anonymize: ["users.email", "orders.user_email"],
   });
   assert.deepEqual(leaky, []);
+});
+
+/** Fixture rows for emailKeySchema: two users, three orders (two for alice). */
+function emailKeyData(): Record<string, Row[]> {
+  return {
+    users: [
+      { email: "alice@x.com", first_name: "Alice" },
+      { email: "bob@x.com", first_name: "Bob" },
+    ],
+    orders: [
+      { id: 1, user_email: "alice@x.com" },
+      { id: 2, user_email: "bob@x.com" },
+      { id: 3, user_email: "alice@x.com" },
+    ],
+  };
+}
+
+test("scrubKeysConfig scrubs a PII key across the join to the same fake", async () => {
+  const s = emailKeySchema();
+  const { order } = topoSort(s);
+  const sel = await collectSubset(
+    s,
+    { orders: 100 },
+    new FakeFetcher(emailKeyData()),
+  );
+  const data = anonymizeAll(s, order, sel, scrubKeysConfig(s, { seed: 7 }));
+  const userEmails = data
+    .find((d) => d.table.key === "public.users")!
+    .rows.map((r) => String(r.email));
+  const orders = data.find((d) => d.table.key === "public.orders")!.rows;
+  // The PII primary key was scrubbed away from the originals, still looks like
+  // an email, and stays unique (it is a primary key).
+  assert.ok(!userEmails.includes("alice@x.com"));
+  assert.equal(new Set(userEmails).size, userEmails.length);
+  for (const e of userEmails) assert.match(e, /@/);
+  // Every order's FK still resolves to a user row after scrubbing.
+  const emailSet = new Set(userEmails);
+  for (const o of orders)
+    assert.ok(emailSet.has(String(o.user_email)), "FK still resolves");
+  // alice's two orders (ids 1 and 3) remap to one shared fake.
+  const aliceEmails = orders
+    .filter((o) => [1, 3].includes(Number(o.id)))
+    .map((o) => String(o.user_email));
+  assert.equal(new Set(aliceEmails).size, 1, "same original → same fake");
+});
+
+test("scrubKeysConfig makes --scan report the PII key as scrub, not key", () => {
+  const s = emailKeySchema();
+  const report = scanSubset(s, scrubKeysConfig(s, {}));
+  const email = report.find(
+    (r) => r.table === "public.users" && r.column === "email",
+  )!;
+  const fk = report.find(
+    (r) => r.table === "public.orders" && r.column === "user_email",
+  )!;
+  assert.equal(email.action, "scrub");
+  assert.equal(fk.action, "scrub");
+});
+
+test("scrubKeysConfig with a secret scrubs the PII key deterministically across runs", async () => {
+  const s = emailKeySchema();
+  const { order } = topoSort(s);
+  const sel = await collectSubset(
+    s,
+    { orders: 100 },
+    new FakeFetcher(emailKeyData()),
+  );
+  const config = scrubKeysConfig(s, { secret: "k" });
+  const run1 = anonymizeAll(s, order, sel, config);
+  const run2 = anonymizeAll(s, order, sel, config);
+  const emails1 = run1
+    .find((d) => d.table.key === "public.users")!
+    .rows.map((r) => r.email);
+  const emails2 = run2
+    .find((d) => d.table.key === "public.users")!
+    .rows.map((r) => r.email);
+  assert.deepEqual(emails1, emails2, "same secret → same fakes across runs");
+  assert.ok(!emails1.includes("alice@x.com"), "still scrubbed");
+});
+
+test("without scrubKeysConfig the PII key stays a verbatim key (warning would fire)", () => {
+  const s = emailKeySchema();
+  const email = scanSubset(s, {}).find(
+    (r) => r.table === "public.users" && r.column === "email",
+  )!;
+  assert.equal(email.action, "key");
+  assert.ok(privateKeyColumns(s, {}).length > 0, "leak warning still fires");
+});
+
+test("scrubKeysConfig leaves non-PII keys alone", () => {
+  const s = shopSchema(); // numeric PKs/FKs
+  const config = scrubKeysConfig(s, { seed: 1 });
+  assert.equal(config.anonymize, undefined, "nothing folded into anonymize");
+  const pk = scanSubset(s, config).find(
+    (r) => r.table === "public.orders" && r.column === "id",
+  )!;
+  assert.equal(pk.action, "key");
 });
 
 test("--children pulls child rows referencing collected rows (downward traversal)", async () => {

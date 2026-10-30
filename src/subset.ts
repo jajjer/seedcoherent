@@ -329,6 +329,26 @@ export function privateKeyColumns(
   return out;
 }
 
+/**
+ * Return `config` with every PII key column `privateKeyColumns` would flag folded
+ * into `anonymize` — the `--scrub-keys` transform. Each leaky key is added as a
+ * `schema.table.column` pattern, so `anonymizeAll`'s group-remap path scrubs it
+ * (and, for a join key, its whole group) consistently while FKs still resolve.
+ * Idempotent and order-preserving; the original `config` is not mutated. With no
+ * leaky keys it returns `config` unchanged.
+ */
+export function scrubKeysConfig(schema: Schema, config: Config): Config {
+  const leaky = privateKeyColumns(schema, config);
+  if (leaky.length === 0) return config;
+  return {
+    ...config,
+    anonymize: [
+      ...(config.anonymize ?? []),
+      ...leaky.map((c) => `${c.table}.${c.column}`),
+    ],
+  };
+}
+
 /** Compile "table.column" / "schema.table.column" / bare "column" patterns into a matcher. */
 function columnMatcher(
   patterns?: string[],
