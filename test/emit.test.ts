@@ -50,6 +50,33 @@ test("array elements with quotes/backslashes are escaped", () => {
   );
 });
 
+test("array elements containing an apostrophe stay inside the SQL literal", () => {
+  // The `'` must be doubled so it can't terminate the surrounding `'{…}'`.
+  assert.equal(
+    sqlLiteral(["O'Brien", "ok"], col("t", { udtName: "_text" })),
+    `'{"O''Brien","ok"}'`,
+  );
+});
+
+test("array Date elements become ISO strings, not Date.toString()", () => {
+  const d = new Date("2025-01-02T03:04:05.000Z");
+  assert.equal(
+    sqlLiteral([d], col("t", { udtName: "_timestamptz" })),
+    `'{"2025-01-02T03:04:05.000Z"}'`,
+  );
+  assert.equal(
+    copyValue([d], col("t", { udtName: "_timestamptz" })),
+    `{"2025-01-02T03:04:05.000Z"}`,
+  );
+});
+
+test("a null array element becomes the unquoted NULL marker", () => {
+  assert.equal(
+    sqlLiteral(["a", null], col("t", { udtName: "_text" })),
+    `'{"a",NULL}'`,
+  );
+});
+
 test("objects and json columns are JSON-encoded and cast to jsonb", () => {
   assert.equal(sqlLiteral({ a: 1 }, jsonCol), `'{"a":1}'::jsonb`);
 });
