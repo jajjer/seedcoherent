@@ -77,7 +77,37 @@ export function normalizeMssqlCheck(clause: string): string {
       (_, id: string) => `"${id.replace(/\]\]/g, "]")}"`,
     )
     .replace(/\bN'/g, "'");
-  return rewriteInLists(requoted);
+  return rewriteInLists(collapseOrEqualities(requoted));
+}
+
+/**
+ * SQL Server stores a `col IN ('a', 'b', ...)` CHECK as an expanded OR-chain of
+ * equalities — `([col]='a' OR [col]='b')` — which the (Postgres-oriented) check
+ * parser doesn't recognize as membership. Collapse any run of 2+ `col = literal`
+ * comparisons on the *same* column joined by `OR` back into the
+ * `col = ANY (ARRAY[...])` form `parseMembership` understands. A chain mixing
+ * columns is left as-is (it isn't a single-column membership test).
+ */
+function collapseOrEqualities(s: string): string {
+  const eq = `"?[A-Za-z_]\\w*"?\\s*=\\s*(?:'(?:[^']|'')*'|-?\\d+(?:\\.\\d+)?)`;
+  const chain = new RegExp(`${eq}(?:\\s+OR\\s+${eq})+`, "gi");
+  const pair = new RegExp(
+    `("?[A-Za-z_]\\w*"?)\\s*=\\s*('(?:[^']|'')*'|-?\\d+(?:\\.\\d+)?)`,
+    "gi",
+  );
+  return s.replace(chain, (match) => {
+    const cols = new Set<string>();
+    const lits: string[] = [];
+    let m: RegExpExecArray | null;
+    pair.lastIndex = 0;
+    while ((m = pair.exec(match)) !== null) {
+      cols.add(m[1].replace(/"/g, ""));
+      lits.push(m[2]);
+    }
+    if (cols.size !== 1) return match;
+    const [col] = [...cols];
+    return `"${col}" = ANY (ARRAY[${lits.join(", ")}])`;
+  });
 }
 
 /** SQL Server stores n-char lengths in bytes; return the declared length in characters. */

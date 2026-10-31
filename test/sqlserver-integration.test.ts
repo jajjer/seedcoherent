@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import mssql from "mssql";
-import { mssqlConfig } from "../src/dialect.js";
+import { mssqlConfig, MssqlConnection } from "../src/dialect.js";
 import { introspectMssql } from "../src/sqlserver-introspect.js";
 import {
   insertDataMssql,
@@ -97,15 +97,10 @@ const SUB_DDL = `
 before(async () => {
   if (!enabled) return;
   pool = await new mssql.ConnectionPool(mssqlConfig(url!)).connect();
-  conn = {
-    async query<T = Record<string, unknown>>(sql: string, params?: unknown[]) {
-      const req = pool.request();
-      (params ?? []).forEach((v, i) => req.input(`p${i + 1}`, v));
-      const res = await req.query(sql);
-      return { rows: (res.recordset ?? []) as unknown as T[] };
-    },
-    async end() {},
-  };
+  // Use the real driver wrapper so the sink exercises production transaction
+  // handling (mssql Transaction/Request, not a bare BEGIN/COMMIT batch). The
+  // raw `pool` is kept for the `.batch()` DDL in setup/teardown.
+  conn = new MssqlConnection(pool);
   await pool.request().batch(DROP);
   await pool
     .request()

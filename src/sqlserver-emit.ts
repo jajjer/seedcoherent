@@ -178,7 +178,6 @@ export class MssqlSink implements RowSink {
   private started = false;
   private currentTable: TableInfo | null = null;
   private currentCols: ColumnInfo[] = [];
-  private identityOn: TableInfo | null = null;
   private readonly filled: TableInfo[] = [];
   private total = 0;
 
@@ -217,10 +216,9 @@ export class MssqlSink implements RowSink {
       await this.start();
       this.currentTable = table;
       this.currentCols = columns;
-      if (hasIdentity(columns)) {
-        await this.conn.query(`SET IDENTITY_INSERT ${tableRef(table)} ON`);
-        this.identityOn = table;
-      }
+      // IDENTITY_INSERT is set per insert batch (see insertChunk), not here: a
+      // standalone `SET IDENTITY_INSERT ON` request doesn't carry over to a
+      // later INSERT request on the same mssql Transaction.
     } catch (err) {
       await this.abort();
       throw err;
@@ -268,20 +266,22 @@ export class MssqlSink implements RowSink {
       });
       return `(${ph.join(", ")})`;
     });
+    // Prefix `SET IDENTITY_INSERT ON` in the *same* batch as the INSERT so the
+    // explicit identity values are accepted — it's scoped to this batch and
+    // resets after, so there's no cross-table IDENTITY_INSERT conflict.
+    const identityPrefix = hasIdentity(cols)
+      ? `SET IDENTITY_INSERT ${tableRef(table)} ON; `
+      : "";
     const sql =
-      `INSERT INTO ${tableRef(table)} (${colList}) VALUES ` + tuples.join(", ");
+      identityPrefix +
+      `INSERT INTO ${tableRef(table)} (${colList}) VALUES ` +
+      tuples.join(", ");
     await this.conn.query(sql, params);
     this.total += rows.length;
   }
 
   async end(): Promise<void> {
     if (this.currentTable) this.filled.push(this.currentTable);
-    if (this.identityOn) {
-      await this.conn.query(
-        `SET IDENTITY_INSERT ${tableRef(this.identityOn)} OFF`,
-      );
-      this.identityOn = null;
-    }
     this.currentTable = null;
   }
 
