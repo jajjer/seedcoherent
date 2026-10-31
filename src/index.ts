@@ -26,6 +26,7 @@ import {
   type Row,
   type TableData,
 } from "./generate.js";
+import { resolveCardinality } from "./cardinality.js";
 import {
   dialectByName,
   dialectFor,
@@ -187,7 +188,11 @@ export async function seed(options: SeedOptions): Promise<SeedResult> {
   const genKeys = order
     .filter(
       (t) =>
-        !skipSet.has(t.name) && !skipSet.has(t.key) && rowCount(t, config) > 0,
+        !skipSet.has(t.name) &&
+        !skipSet.has(t.key) &&
+        // A cardinality-bound table derives its count from its parents, so it
+        // generates even when its own --rows is 0.
+        (rowCount(t, config) > 0 || resolveCardinality(t, config) !== null),
     )
     .map((t) => t.key);
   const unsupported = requiredUnsupportedColumns(schema, config, genKeys);

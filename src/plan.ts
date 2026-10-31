@@ -11,6 +11,7 @@ import {
   type Row,
   type TableData,
 } from "./generate.js";
+import { derivedRowCount, resolveCardinality } from "./cardinality.js";
 import type { Config, Schema, TableInfo } from "./types.js";
 
 export interface TablePlan {
@@ -61,9 +62,29 @@ export function buildPlan(
     sampled.set(d.table.key, d.rows.slice(0, sampleSize));
   }
 
+  // Planned counts, in topological order so a cardinality table's derived count
+  // (sum of per-parent draws) can read its parent's already-computed count.
+  const plannedCount = new Map<string, number>();
+  for (const t of order) {
+    if (isSkipped(t)) {
+      plannedCount.set(t.key, 0);
+      continue;
+    }
+    const binding = resolveCardinality(t, config);
+    if (binding) {
+      const parentCount = plannedCount.get(binding.fk.refTable) ?? 0;
+      plannedCount.set(
+        t.key,
+        derivedRowCount(t, binding.spec, parentCount, config),
+      );
+    } else {
+      plannedCount.set(t.key, rowCount(t, config));
+    }
+  }
+
   const tables: TablePlan[] = order.map((t) => ({
     key: t.key,
-    rows: isSkipped(t) ? 0 : rowCount(t, config),
+    rows: plannedCount.get(t.key) ?? 0,
     cyclic: cyclic.has(t.key),
     skipped: isSkipped(t),
     sample: sampled.get(t.key) ?? [],

@@ -5,6 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import {
   loadConfig,
+  parseCardinalitySpecs,
   parseColumnSpecs,
   parseDistSpecs,
   parseLinkGroups,
@@ -12,6 +13,7 @@ import {
   parseRowSpecs,
   parseSampleRateSpecs,
   parseWhereSpecs,
+  validateCardinality,
   validateNullRates,
 } from "./config.js";
 import {
@@ -102,6 +104,11 @@ program
   .option(
     "--distribution <spec...>",
     "skew a column: FK fan-out (orders.user_id=zipf), or a value column's labels (orders.status=zipf, orders.status=weighted:paid=0.9,refunded=0.1)",
+    [],
+  )
+  .option(
+    "--cardinality <spec...>",
+    "bound children per parent on an FK (derives the child row count): order_items.order_id=3 (exactly 3), orders.user_id=1-3 (1 to 3)",
     [],
   )
   .option(
@@ -250,6 +257,10 @@ program
         ...fileConfig.distributions,
         ...parseDistSpecs(opts.distribution),
       },
+      cardinality: {
+        ...fileConfig.cardinality,
+        ...parseCardinalitySpecs(opts.cardinality),
+      },
       nullRates: {
         ...fileConfig.nullRates,
         ...parseNullRateSpecs(opts.nullRate),
@@ -267,6 +278,7 @@ program
       temporalWindow(config);
       resolveLocale(config.locale);
       validateNullRates(config.nullRates);
+      validateCardinality(config.cardinality);
     } catch (err) {
       program.error(err instanceof Error ? err.message : String(err));
     }

@@ -20,6 +20,11 @@ import {
 } from "./distribution.js";
 import { DEFAULT_BATCH_SIZE } from "./config.js";
 import {
+  buildAssignment,
+  cardFakerFor,
+  resolveCardinality,
+} from "./cardinality.js";
+import {
   applyTemporal,
   createdColumn,
   planTemporal,
@@ -91,6 +96,9 @@ export interface AppendContext {
 
 const NULL_PROBABILITY = 0.08;
 const UNIQUE_RETRIES = 25;
+
+/** Tables already warned about --cardinality overriding --rows (warn once). */
+const cardinalityOverrideWarned = new Set<string>();
 
 export function rowCount(table: TableInfo, config: Config): number {
   const byName = config.rows?.[table.name] ?? config.rows?.[table.key];
@@ -277,6 +285,36 @@ export function* streamData(
       fkSamplers.set(fk, dist.bind(parents));
     }
 
+    // Cardinality binding (optional): assign parents to children so each parent
+    // collects a count in [min, max], instead of each child sampling a parent.
+    // This *derives* the row count (sum of the per-parent draws), overriding any
+    // --rows for this table. Built over the already-generated parent pool, with
+    // its own RNG so non-cardinality columns stay byte-identical under --seed.
+    const cardBinding = resolveCardinality(table, config);
+    const cardAssignments = new Map<ForeignKey, Row[]>();
+    if (cardBinding) {
+      const parents = generated.get(cardBinding.fk.refTable) ?? [];
+      const assignment = buildAssignment(
+        parents,
+        cardBinding.spec,
+        cardFakerFor(table, config),
+      );
+      cardAssignments.set(cardBinding.fk, assignment);
+      // Warn once (per table, per process) when --cardinality supersedes an
+      // explicit --rows, so a silent override doesn't surprise. No count here:
+      // the dry-run plan generates a capped sample, so the real derived total
+      // isn't known at this point — the plan's rows column reports it exactly.
+      const named =
+        config.rows?.[table.name] !== undefined ||
+        config.rows?.[table.key] !== undefined;
+      if (named && !cardinalityOverrideWarned.has(table.key)) {
+        cardinalityOverrideWarned.add(table.key);
+        process.stderr.write(
+          `seedcoherent: --cardinality drives the row count for "${table.key}"; its --rows count is ignored.\n`,
+        );
+      }
+    }
+
     // Temporal coherence plan for this table, plus which of its columns are off
     // limits (user-pinned via --column, or a partition key that must route to a
     // real partition).
@@ -294,7 +332,9 @@ export function* streamData(
       isOverridden(table, colName, config.columns);
     const coherenceEligible = (colName: string) => gens.has(colName);
 
-    const count = rowCount(table, config);
+    const count = cardBinding
+      ? (cardAssignments.get(cardBinding.fk)?.length ?? 0)
+      : rowCount(table, config);
     // Full row history for this table, needed for self-referential FK draws and
     // to seed the `generated` pool other tables draw from.
     const rows: Row[] = [];
@@ -326,6 +366,7 @@ export function* streamData(
             nullRates,
             faker,
             fkSamplers,
+            cardAssignments,
             fkParents,
             rows,
             i,
@@ -564,6 +605,7 @@ function valueForColumn(
   nullRates: Map<string, number>,
   faker: Faker,
   fkSamplers: Map<ForeignKey, Sampler<Row>>,
+  cardAssignments: Map<ForeignKey, Row[]>,
   fkParents: Map<ForeignKey, Row | null>,
   currentRows: Row[],
   rowIndex: number,
@@ -600,8 +642,17 @@ function valueForColumn(
     // then reuse it so every column of a composite FK copies the same tuple.
     let parent = fkParents.get(fk);
     if (parent === undefined && !fkParents.has(fk)) {
-      const sample = fkSamplers.get(fk);
-      parent = sample ? sample(faker) : null; // no sampler ⇒ empty parent pool
+      // A cardinality-bound FK takes its parent from the precomputed assignment,
+      // indexed by this row's position — not a sampler — so each parent lands in
+      // its [min, max] range. Index by rowIndex (not a running counter) so the
+      // UNIQUE-retry loop re-reading the same row stays idempotent.
+      const assignment = cardAssignments.get(fk);
+      if (assignment) {
+        parent = assignment[rowIndex] ?? null;
+      } else {
+        const sample = fkSamplers.get(fk);
+        parent = sample ? sample(faker) : null; // no sampler ⇒ empty parent pool
+      }
       fkParents.set(fk, parent);
     }
     if (!parent) return col.nullable ? null : undefined;

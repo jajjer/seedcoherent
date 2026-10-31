@@ -275,14 +275,47 @@ export function mssqlConfig(connStr: string): mssql.config {
   };
 }
 
-/** Wraps an `mssql` single-connection pool as a driver-neutral Connection (`@pN` params). */
-class MssqlConnection implements Connection {
+/**
+ * Wraps an `mssql` single-connection pool as a driver-neutral Connection (`@pN`
+ * params).
+ *
+ * Transaction control can't go through `pool.request().query("BEGIN
+ * TRANSACTION")`: tedious (v19+) guards every request against leaving
+ * `@@TRANCOUNT` changed from where it started and throws "mismatching number of
+ * BEGIN and COMMIT statements", so a bare `BEGIN`/`COMMIT`/`ROLLBACK` batch
+ * fails. Instead we intercept those statements and drive mssql's `Transaction`
+ * object, running every other query on a `Request` bound to the open
+ * transaction so all statements share its one physical connection. Callers keep
+ * issuing plain SQL — the sink is unchanged.
+ */
+export class MssqlConnection implements Connection {
+  private tx: mssql.Transaction | null = null;
   constructor(private pool: mssql.ConnectionPool) {}
   async query<T = Record<string, unknown>>(
     sql: string,
     params?: unknown[],
   ): Promise<{ rows: T[] }> {
-    const req = this.pool.request();
+    const verb = sql.trim().toUpperCase();
+    if (verb === "BEGIN TRANSACTION" || verb === "BEGIN TRAN") {
+      this.tx = new mssql.Transaction(this.pool);
+      await this.tx.begin();
+      return { rows: [] };
+    }
+    if (verb === "COMMIT" || verb === "COMMIT TRANSACTION") {
+      if (this.tx) {
+        await this.tx.commit();
+        this.tx = null;
+      }
+      return { rows: [] };
+    }
+    if (verb === "ROLLBACK" || verb === "ROLLBACK TRANSACTION") {
+      if (this.tx) {
+        await this.tx.rollback();
+        this.tx = null;
+      }
+      return { rows: [] };
+    }
+    const req = this.tx ? new mssql.Request(this.tx) : this.pool.request();
     (params ?? []).forEach((v, i) => req.input(`p${i + 1}`, v));
     const res = await req.query(sql);
     return { rows: (res.recordset ?? []) as unknown as T[] };

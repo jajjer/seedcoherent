@@ -160,6 +160,18 @@ export type DistSpec =
   | { kind: "weighted"; weights: Array<{ value: unknown; weight: number }> };
 
 /**
+ * Child cardinality for one foreign-key edge: how many child rows each
+ * referenced parent collects. `{ min: 3, max: 3 }` is an exact fan-out (every
+ * parent gets 3 children); a range picks a per-parent count uniformly in
+ * `[min, max]`. `min: 0` lets some parents be childless. Both are non-negative
+ * integers with `min ≤ max`.
+ */
+export interface CardSpec {
+  min: number;
+  max: number;
+}
+
+/**
  * How generated rows are serialized on the `--out`/`--print` path. `sql` (the
  * default) emits a runnable script; `csv` and `ndjson` write one plain-text file
  * per table into the `--out` directory, with no SQL and no database involved.
@@ -200,6 +212,17 @@ export interface Config {
    * "schema.table.column", or bare "column".
    */
   distributions?: Record<string, DistSpec>;
+  /**
+   * Per-foreign-key child cardinality, keyed by the child FK column
+   * ("table.column", "schema.table.column", or bare "column" — the first column
+   * of a composite FK). Bounds how many child rows each referenced parent
+   * collects: `{ min, max }` draws a per-parent count in that range (exact when
+   * `min === max`). This **derives the child table's row count** — the sum of
+   * the per-parent draws — so a `--rows`/`--default-rows` count for that table
+   * is ignored. At most one FK per child table may carry a spec, and an FK with
+   * a cardinality spec may not also carry a `distributions` entry.
+   */
+  cardinality?: Record<string, CardSpec>;
   /**
    * Per-column NULL fraction for plain nullable columns: the probability (0–1)
    * that a given row leaves the column NULL instead of generating a value.

@@ -73,6 +73,13 @@ everything and inserts in dependency order inside a single transaction.
   `values:` list. Ask for `status=weighted:paid=0.9,refunded=0.1` and 90% of
   orders come out `paid`; ask for `zipf` and the column skews toward its first
   label — no more dead-even splits across states real data never has.
+- **Bounded relationships.** Where `--distribution` shapes *how lopsided* a
+  fan-out is, `--cardinality` *bounds* it. `--cardinality orders.user_id=1-3`
+  gives every user 1–3 orders; `order_items.order_id=3` puts exactly three items
+  on every order; an exact count on a `UNIQUE` foreign key is a true 1:1. The
+  child count stops being something you guess at — it's derived from the parents
+  and the bound (so `--rows` for that table is ignored), the way an invoice
+  always has at least one line and a profile is one-per-user.
 - **Nullable like real data.** `--null-rate users.middle_name=0.7` leaves a
   column empty on the fraction of rows real data does — a `deleted_at` `NULL` on
   every live row, an optional field present a third of the time — instead of one
@@ -168,6 +175,12 @@ npx seedcoherent $DATABASE_URL --rows users=1000 orders=5000 \
 # Skew a foreign key so a few parents get most of the children (power-law fan-out)
 npx seedcoherent $DATABASE_URL --rows users=1000 orders=20000 \
   --distribution orders.user_id=zipf
+
+# Bound children per parent — each user gets 1–3 orders, each order exactly 3
+# items. The child row counts are derived from the parents (so --rows for them
+# is ignored); users is still the 1000 you asked for.
+npx seedcoherent $DATABASE_URL --rows users=1000 \
+  --cardinality orders.user_id=1-3 order_items.order_id=3
 
 # Skew a categorical column's values: explicit weights, or a power-law over its
 # labels (enum values / CHECK IN set / --column values: list)
@@ -266,6 +279,7 @@ Sample rows:
 | `--schema <name...>` | Schema(s) to read (default: `public`) |
 | `--skip <table...>` | Tables to leave empty |
 | `--distribution <col=kind...>` | Skew a column: FK fan-out (`orders.user_id=zipf`, `…=zipf:2`) or a value column's labels (`orders.status=zipf`, `orders.status=weighted:paid=0.9,refunded=0.1`); default `uniform` |
+| `--cardinality <col=spec...>` | Bound children per parent on an FK, deriving the child row count: exact (`order_items.order_id=3`) or range (`orders.user_id=1-3`) (see below) |
 | `-C, --column <col=gen...>` | Override a column's generator, e.g. `users.email=internet.email`, `status=values:active,paid`, or `tier=value:gold` (see below) |
 | `--null-rate <col=rate...>` | Fraction (0–1) of rows a nullable column is left `NULL`, e.g. `users.middle_name=0.7` or `orders.deleted_at=1` (see below) |
 | `--profile` | Learn the shape of the existing data — null rates, value weights, FK fan-out, timestamp window — and generate to match (see below) |
@@ -291,6 +305,45 @@ Sample rows:
 | `--link <group...>` | Scrub denormalized copies to the *same* fake (see below) |
 | `--scan` | Print a per-column privacy report and exit without copying (see below) |
 | `--json` | With `--scan`, emit the report as JSON instead of a table |
+
+### Cardinality
+
+`--distribution` decides *how lopsided* a foreign-key fan-out is, but every
+child still independently picks a parent, so you can't bound the shape — nothing
+guarantees each user has at least one order, or that no order carries fifty line
+items. `--cardinality` bounds it directly. It attaches to one foreign-key edge,
+keyed by the child's FK column (`table.column`, `schema.table.column`, or a bare
+`column` — the same precedence `--distribution` uses; the first column names a
+composite FK), and takes either an exact count or an inclusive range:
+
+```bash
+# Every order has exactly 3 line items
+npx seedcoherent $DATABASE_URL --rows orders=5000 --cardinality order_items.order_id=3
+
+# Each user has 1 to 3 orders (per-parent count drawn uniformly in the range)
+npx seedcoherent $DATABASE_URL --rows users=1000 --cardinality orders.user_id=1-3
+
+# A true 1:1 — exactly one profile per user (the FK is UNIQUE in the schema)
+npx seedcoherent $DATABASE_URL --rows users=1000 --cardinality profiles.user_id=1
+```
+
+Because the per-parent count is what you're fixing, the **child table's row
+count is derived** — the sum of the per-parent draws — so a `--rows` for that
+table is ignored (with a one-time note). The parents are the ones you asked for
+(`users=1000` above); the children follow from the bound. `min=0` (e.g. `0-2`)
+lets some parents be childless, thinning the total; an exact count on an FK that
+the schema marks `UNIQUE` gives a genuine one-to-one. Every child still
+references a real parent, so the slice stays referentially complete.
+
+Counts are non-negative integers with `min ≤ max`, and the draw is reproducible
+under `--seed` (an exact count needs no seed — it's fixed). The same option is a
+`"cardinality"` map (`{ "orders.user_id": { "min": 1, "max": 3 } }`) in the
+[config file](#config-file). At most one FK per child table may be bounded (two
+would each demand a different row count), the bounded FK may not also carry a
+`--distribution` (both decide parent selection), and a self-referential FK isn't
+supported — each is rejected up front. `--profile` never infers cardinality; a
+`--cardinality` you set wins over a profiled fan-out on the same column. Default
+(unqualified) runs are unchanged.
 
 ### Null rates
 
@@ -440,7 +493,8 @@ The schema comes from one of three mutually-exclusive sources:
   written) and closed before the call resolves.
 
 Every CLI knob is a field: `rows`, `defaultRows`, `seed`, `locale`,
-`since`/`until`, `skip`, `distributions`, `nullRates`, and per-column `columns`
+`since`/`until`, `skip`, `distributions`, `cardinality`, `nullRates`, and
+per-column `columns`
 overrides, plus `dialect`/`schemaDialect` (for `ddl`/`schemaFile`) and `schemas`
 (for a live `connection`).
 
@@ -786,6 +840,10 @@ generators or set counts. CLI flags win over the file.
       { "value": "refunded", "weight": 0.1 }
     ] }
   },
+  "cardinality": {
+    "order_items.order_id": { "min": 3, "max": 3 },
+    "orders.user_id": { "min": 1, "max": 3 }
+  },
   "nullRates": { "users.middle_name": 0.7, "orders.deleted_at": 1 },
   "anonymize": ["accounts.email"],
   "preserve": ["users.country"]
@@ -812,6 +870,12 @@ law); raise it to concentrate harder, lower it toward uniform. `"weighted"`
 assigns explicit relative weights to named values (for a value column only — it
 carries its own labels, and is ignored on a foreign key). Referential integrity
 is unchanged — every child still points at a real parent.
+
+`cardinality` bounds children per parent on a foreign key (same key forms),
+matching the `--cardinality` flag: `{ "min": n, "max": m }` draws each parent a
+child count in `[min, max]` (exact when equal), deriving the child table's row
+count and so overriding its `"rows"`. At most one FK per table, not combinable
+with a `distributions` entry on the same FK, and not for a self-reference.
 
 `nullRates` maps a column (same key forms) to the fraction of rows left `NULL`,
 matching the `--null-rate` flag — `0` always fills, `1` always nulls. It applies

@@ -170,15 +170,23 @@ test("MssqlSink batches a multi-row @pN INSERT inside a transaction", async () =
   assert.deepEqual(insert.params, [1, "a", 2, "b"]);
 });
 
-test("MssqlSink toggles IDENTITY_INSERT and reseeds identity on finalize", async () => {
+test("MssqlSink sets IDENTITY_INSERT in the insert batch and reseeds on finalize", async () => {
   const t = table("users", { schema: "app", columns: [idCol, textCol] });
   const conn = new RecordingConn();
   await runSink(conn, [
     { table: t, columns: t.columns, rows: [{ id: 1, c: "a" }] },
   ]);
   const sqls = conn.calls.map((c) => c.sql);
-  assert.ok(sqls.includes("SET IDENTITY_INSERT [app].[users] ON"));
-  assert.ok(sqls.includes("SET IDENTITY_INSERT [app].[users] OFF"));
+  // IDENTITY_INSERT must share the INSERT's batch — a standalone SET doesn't
+  // carry over to a later request on the same mssql transaction.
+  const insert = conn.calls.find((c) => c.sql.includes("INSERT INTO"))!;
+  assert.ok(
+    insert.sql.startsWith("SET IDENTITY_INSERT [app].[users] ON; INSERT INTO "),
+    `expected IDENTITY_INSERT prefix on the insert batch, got: ${insert.sql}`,
+  );
+  // No standalone IDENTITY_INSERT toggles are issued as separate statements.
+  assert.ok(!sqls.includes("SET IDENTITY_INSERT [app].[users] ON"));
+  assert.ok(!sqls.includes("SET IDENTITY_INSERT [app].[users] OFF"));
   assert.ok(
     sqls.includes("DBCC CHECKIDENT ('app.users', RESEED)"),
     "reseeds identity so later app inserts don't collide",

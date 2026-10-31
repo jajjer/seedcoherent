@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import type { Config, ColumnOverride, DistSpec } from "./types.js";
+import type { Config, ColumnOverride, DistSpec, CardSpec } from "./types.js";
 
 const DEFAULT_NAMES = ["seed.config.json", "seed.config.js", "seed.config.mjs"];
 
@@ -148,6 +148,80 @@ export function validateNullRates(nullRates?: Record<string, number>): void {
         `Invalid null rate for "${column}": ${rate} (need a number in [0, 1])`,
       );
     }
+  }
+}
+
+/**
+ * Parse repeated `table.fkColumn=spec` CLI flags into a cardinality map. `spec`
+ * bounds how many child rows each referenced parent collects, either an exact
+ * count (`3`) or an inclusive range (`1-3`). Counts are non-negative integers
+ * and `min ≤ max`. Keyed by the child FK column — "table.column",
+ * "schema.table.column", or bare "column" — like the distribution map.
+ */
+export function parseCardinalitySpecs(
+  specs: string[],
+): Record<string, CardSpec> {
+  const out: Record<string, CardSpec> = {};
+  for (const spec of specs) {
+    const eq = spec.indexOf("=");
+    if (eq === -1)
+      throw new Error(
+        `Invalid --cardinality spec "${spec}" (expected table.column=N or table.column=MIN-MAX)`,
+      );
+    const column = spec.slice(0, eq).trim();
+    if (!column)
+      throw new Error(`Invalid --cardinality spec "${spec}" (empty column)`);
+    out[column] = parseCardValue(spec.slice(eq + 1).trim(), spec);
+  }
+  return out;
+}
+
+/** Parse the right-hand side of a cardinality spec — `N` or `MIN-MAX`. */
+function parseCardValue(rhs: string, spec: string): CardSpec {
+  // A dash at position 0 is a negative sign, not a range separator — let
+  // parseCount reject it. A real range needs digits on both sides.
+  const dash = rhs.indexOf("-");
+  if (dash <= 0) {
+    const n = parseCount(rhs, spec);
+    return { min: n, max: n };
+  }
+  const min = parseCount(rhs.slice(0, dash), spec);
+  const max = parseCount(rhs.slice(dash + 1), spec);
+  if (min > max)
+    throw new Error(`Invalid cardinality range in "${spec}" (min > max)`);
+  return { min, max };
+}
+
+/** Parse a non-negative integer count, rejecting anything else. */
+function parseCount(raw: string, spec: string): number {
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < 0)
+    throw new Error(
+      `Invalid count "${raw.trim()}" in "${spec}" (need a non-negative integer)`,
+    );
+  return n;
+}
+
+/**
+ * Guard the merged `cardinality` map (CLI flags plus any config-file entries),
+ * so a bad range a raw config file could carry fails before any rows build.
+ */
+export function validateCardinality(
+  cardinality?: Record<string, CardSpec>,
+): void {
+  if (!cardinality) return;
+  for (const [column, spec] of Object.entries(cardinality)) {
+    const ok =
+      spec &&
+      typeof spec === "object" &&
+      Number.isInteger(spec.min) &&
+      Number.isInteger(spec.max) &&
+      spec.min >= 0 &&
+      spec.max >= spec.min;
+    if (!ok)
+      throw new Error(
+        `Invalid cardinality for "${column}": need { min, max } non-negative integers with min ≤ max`,
+      );
   }
 }
 
