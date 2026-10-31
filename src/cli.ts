@@ -32,6 +32,7 @@ import {
   buildData,
   generateInto,
   requiredUnsupportedColumns,
+  unsatisfiableRequiredFks,
   rowCount,
   type AppendContext,
   type TableStats,
@@ -498,6 +499,33 @@ program
             ].join("\n"),
           );
         }
+
+        // A NOT NULL FK whose parent has no rows when the child generates (a FK
+        // cycle, or a skipped / zero-row parent) would be emitted as NULL and
+        // rejected mid-transaction — report it up front too.
+        const unsatisfiable = unsatisfiableRequiredFks(
+          schema,
+          order,
+          config,
+          appendCtx,
+        );
+        if (unsatisfiable.length > 0) {
+          const lines = unsatisfiable.map(
+            (u) =>
+              `  ${u.table} (${u.columns.join(", ")}) → ${u.refTable}` +
+              (u.reason === "cycle"
+                ? " — NOT NULL FK cycle"
+                : " — parent has no rows"),
+          );
+          program.error(
+            [
+              `Can't satisfy ${unsatisfiable.length} NOT NULL foreign key(s); the parent has no rows when the child is generated:`,
+              ...lines,
+              "",
+              "Make the FK column nullable, give the parent rows (don't --skip it / set a non-zero count), or for a true cycle use a DEFERRABLE constraint.",
+            ].join("\n"),
+          );
+        }
       }
 
       const batchSize: number | undefined = config.batchSize;
@@ -765,6 +793,24 @@ async function runOffline(
         "Provide a value and re-run — e.g.:",
         `  --column ${first.table}.${first.column}=value:<literal>`,
         "(a faker path or values:a,b,c work too), or make the column nullable / give it a DB default.",
+      ].join("\n"),
+    );
+  }
+  const unsatisfiable = unsatisfiableRequiredFks(schema, order, config);
+  if (unsatisfiable.length > 0) {
+    const lines = unsatisfiable.map(
+      (u) =>
+        `  ${u.table} (${u.columns.join(", ")}) → ${u.refTable}` +
+        (u.reason === "cycle"
+          ? " — NOT NULL FK cycle"
+          : " — parent has no rows"),
+    );
+    program.error(
+      [
+        `Can't satisfy ${unsatisfiable.length} NOT NULL foreign key(s); the parent has no rows when the child is generated:`,
+        ...lines,
+        "",
+        "Make the FK column nullable, give the parent rows (don't --skip it / set a non-zero count), or for a true cycle use a DEFERRABLE constraint.",
       ].join("\n"),
     );
   }
