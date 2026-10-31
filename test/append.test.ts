@@ -190,6 +190,36 @@ test("the append dry-run plan lists only grown tables with real FK samples", asy
   }
 });
 
+test("new rows don't collide with an existing UNIQUE value in the target", async () => {
+  // `code` is UNIQUE and constrained to a 4-value domain; two values are already
+  // taken in the target. Growing by two must pick the two free values, never
+  // re-emit an existing one.
+  const flags = table("flags", {
+    columns: [idCol(), col("code", { udtName: "text" })],
+    primaryKey: ["id"],
+    uniques: [["code"]],
+    checks: [
+      {
+        expr: "(code = ANY (ARRAY['a'::text, 'b'::text, 'c'::text, 'd'::text]))",
+      },
+    ],
+  });
+  const s = schema(flags);
+  const existing: Row[] = [
+    { id: 1, code: "a" },
+    { id: 2, code: "b" },
+  ];
+  const config: Config = { rows: { flags: 2 }, seed: 11 };
+  const { order, cyclic } = topoSort(s);
+  const ctx = await planAppend(s, order, config, new FakeFetcher({ flags: existing }));
+  const rows = buildData(s, order, cyclic, config, ctx)[0].rows;
+
+  const newCodes = rows.map((r) => r.code);
+  for (const c of newCodes)
+    assert.ok(!["a", "b"].includes(c as string), `reused existing code ${c}`);
+  assert.deepEqual([...newCodes].sort(), ["c", "d"]);
+});
+
 test("append output is deterministic for a fixed seed", async () => {
   const s = shopSchema();
   const config: Config = { rows: { orders: 8 }, seed: 42 };

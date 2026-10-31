@@ -62,6 +62,7 @@ export async function planAppend(
   const generate = appendTargets(schema, config);
   const existing = new Map<string, Row[]>();
   const startIds = new Map<string, number>();
+  const existingUnique = new Map<string, Row[]>();
 
   // Referenced parents that we are NOT growing supply their rows from the DB.
   const parentKeys = new Set<string>();
@@ -88,5 +89,16 @@ export async function planAppend(
     }
   }
 
-  return { existing, startIds, generate };
+  // Grown tables with a PK or UNIQUE constraint: pull a bounded sample of their
+  // existing rows so streamData can pre-seed uniqueness. A synthetic integer PK
+  // is already handled by startIds, but a UNIQUE non-PK column (e.g. `email`) or
+  // a natural/uuid PK would otherwise collide with rows already in the target.
+  for (const key of generate) {
+    const table = schema.tables.get(key);
+    if (!table) continue;
+    if (table.primaryKey.length === 0 && table.uniques.length === 0) continue;
+    existingUnique.set(key, await fetcher.fetchRoots(table, parentLimit));
+  }
+
+  return { existing, startIds, generate, existingUnique };
 }
