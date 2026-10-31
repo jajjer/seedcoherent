@@ -47,15 +47,32 @@ export function sqlLiteral(v: unknown, col: ColumnInfo): string {
     return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
   }
   if (Array.isArray(v)) {
-    const inner = v
-      .map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`)
-      .join(",");
-    return `'{${inner}}'`;
+    // Escape `'` across the whole literal so a text element containing an
+    // apostrophe can't break out of the surrounding SQL string.
+    return `'${pgArrayLiteral(v).replace(/'/g, "''")}'`;
   }
   if (typeof v === "object") {
     return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
   }
   return `'${String(v).replace(/'/g, "''")}'`;
+}
+
+/**
+ * Format one element of a Postgres array literal: a JS `Date` becomes an ISO
+ * string (not `Date.toString()`), a `Buffer` a `\x…` hex literal, and `null`
+ * the unquoted `NULL` marker; everything else is stringified. The result is
+ * double-quoted with `"` and `\` escaped — the same quoting the scalar
+ * `sqlLiteral`/`copyValue` branches use — so it is safe inside `{…}`.
+ */
+function arrayElementLiteral(el: unknown): string {
+  if (el === null || el === undefined) return "NULL";
+  const s =
+    el instanceof Date
+      ? el.toISOString()
+      : Buffer.isBuffer(el)
+        ? `\\x${el.toString("hex")}`
+        : String(el);
+  return `"${s.replace(/["\\]/g, "\\$&")}"`;
 }
 
 /**
@@ -173,10 +190,7 @@ function copyEscape(s: string): string {
 
 /** Build a Postgres array literal `{"a","b"}` (same quoting as sqlLiteral). */
 function pgArrayLiteral(v: unknown[]): string {
-  const inner = v
-    .map((el) => `"${String(el).replace(/["\\]/g, "\\$&")}"`)
-    .join(",");
-  return `{${inner}}`;
+  return `{${v.map(arrayElementLiteral).join(",")}}`;
 }
 
 /** Encode one row as a tab-separated, newline-terminated COPY text line. */

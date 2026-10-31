@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.1] — 2026-10-31
+
+### Fixed
+
+- **Array literals now format their elements correctly.** A `date[]`/`timestamp[]`/`timestamptz[]` column generated JS `Date` elements that were emitted via `String(el)` — producing `Wed Jan 01 2025 …` instead of the ISO form the scalar path already uses — so Postgres rejected the insert; `bytea[]` elements were mangled the same way. And the SQL-script (`--out`/`--print`) array path escaped only `"` and `\`, never `'`, so a text element containing an apostrophe broke out of the surrounding `'{…}'` literal. Both array paths (SQL literals and `COPY`) now run every element through one shared `arrayElementLiteral` that mirrors the scalar formatting — `Date` → ISO, `Buffer` → `\x…` hex, `null` → the unquoted `NULL` marker — and the SQL array literal escapes `'` across the whole value. (Correctness hardening, phase 1: emit-layer value formatting.)
+
 ## [0.32.0] — 2026-10-30
 
 ### Added
