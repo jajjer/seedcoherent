@@ -87,6 +87,11 @@ export interface AppendContext {
   /** table.keys to actually generate new rows for; all others only contribute
    *  their existing pool and emit nothing. */
   generate: Set<string>;
+  /** table.key -> existing rows of a *grown* table, used to pre-seed uniqueness
+   *  so new values (including a non-integer PK) can't collide with ones already
+   *  in the target. Bounded like the parent pool, so collisions are detected
+   *  only against the sampled rows. */
+  existingUnique?: Map<string, Row[]>;
 }
 
 const NULL_PROBABILITY = 0.08;
@@ -393,6 +398,17 @@ export function* streamData(
       (u) => u.length > 0,
     );
     const seen = uniqueSets.map(() => new Set<string>());
+    // In append mode, pre-seed each unique set with the values already in the
+    // target so a new row can't collide with an existing one (covers a UNIQUE
+    // non-PK column and a non-integer PK, which startIds doesn't continue).
+    const existingUnique = append?.existingUnique?.get(table.key);
+    if (existingUnique) {
+      for (const r of existingUnique) {
+        uniqueSets.forEach((cols, idx) => {
+          seen[idx].add(cols.map((c) => serializeKey(r[c])).join("\u0001"));
+        });
+      }
+    }
 
     // Synthetic ids continue past whatever is already in the target (append),
     // else start at 1.

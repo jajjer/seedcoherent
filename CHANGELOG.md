@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.4] — 2026-10-31
+
+### Fixed
+
+- **`--append` now dedups new rows against the values already in the target.** `streamData` always built its per-constraint uniqueness sets empty, and `planAppend` continued only a **single-column integer** synthetic PK past `MAX(id)` — so growing a table with a `UNIQUE` non-PK column (the classic case: `email`) or a natural/`uuid`/composite PK deduped new rows only against each other, letting them collide with rows already present and fail with a duplicate-key error. `planAppend` now pulls a bounded sample of each grown table's existing rows (new optional `existingUnique` on `AppendContext`) and `streamData` pre-seeds every unique set (PK included) from it, so a newly generated value — including a non-integer PK that `startIds` can't continue — can't duplicate an existing one. Collisions are detected against the sampled rows, bounded like the existing parent pool. (Correctness hardening, phase 4: append-mode uniqueness.)
+
 ## [0.32.3] — 2026-10-31
 
 ### Fixed
