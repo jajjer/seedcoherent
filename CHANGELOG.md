@@ -4,6 +4,13 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.5] — 2026-10-31
+
+### Fixed
+
+- **Uniqueness no longer gives up prematurely, and a short table is no longer silent.** The per-row retry budget for finding a fresh value against a UNIQUE constraint was a fixed 25 random draws — for a domain only a little larger than the row count (26 distinct values, 26 rows) that missed the last free value ~37% of the time, stopping the table early even though a valid value existed. The budget is now 200 (the same miss drops below 0.1%), and when a table still finishes short of its requested count — a genuinely exhausted domain — seedcoherent prints a stderr warning naming the table and the produced-vs-requested counts instead of under-generating silently. (Correctness hardening, phase 5.)
+- **Partitioned tables that might not route now warn up front.** A table partitioned by a key seedcoherent can't confine to a covered partition — hash, an expression key, a multi-column key, or unparseable RANGE/LIST bounds — with no `DEFAULT` partition could generate rows that no partition accepts, failing the insert. Such a table now prints a one-time stderr warning explaining the risk and how to fix it (add a `DEFAULT` partition, or pin the key with `--column`), via the new exported `unroutablePartition` helper (`src/generate.ts`). It's a warning, not an error, because coverage may in fact be complete (e.g. all hash remainders present). (Correctness hardening, phase 5: partition routability.)
+
 ## [0.32.4] — 2026-10-31
 
 ### Fixed

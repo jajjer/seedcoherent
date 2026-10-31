@@ -2,11 +2,16 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildData, generateInto, CollectSink } from "../src/generate.js";
+import {
+  buildData,
+  generateInto,
+  CollectSink,
+  unroutablePartition,
+} from "../src/generate.js";
 import { toSql } from "../src/emit.js";
 import { topoSort } from "../src/graph.js";
 import { col, fk, idCol, schema, table } from "./helpers.js";
-import type { Config, Schema } from "../src/types.js";
+import type { Config, Schema, TableInfo } from "../src/types.js";
 
 /** Introspect-free build: topo-sort then generate. */
 function build(s: Schema, config: Config) {
@@ -152,6 +157,88 @@ test("row count is capped when the unique domain is exhausted", () => {
   const labels = rowsFor(data, "public.tags").map((r) => r.label);
   assert.equal(labels.length, 3);
   assert.deepEqual([...labels].sort(), ["a", "b", "c"]);
+});
+
+test("a short table (exhausted unique domain) warns on stderr", () => {
+  const tags = table("tags", {
+    columns: [col("label", { udtName: "text" })],
+    uniques: [["label"]],
+  });
+  const original = process.stderr.write.bind(process.stderr);
+  let captured = "";
+  (process.stderr as NodeJS.WriteStream).write = ((s: string) => {
+    captured += s;
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    build(schema(tags), {
+      rows: { tags: 10 },
+      columns: { "tags.label": { values: ["a", "b", "c"] } },
+      seed: 1,
+    });
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.match(captured, /public\.tags produced 3 of 10/);
+});
+
+test("unroutablePartition flags best-effort partition keys, not safe ones", () => {
+  const base = table("events", {
+    columns: [idCol(), col("tenant", { udtName: "int4" })],
+    primaryKey: ["id"],
+  });
+  const withPart = (part: NonNullable<TableInfo["partition"]>): TableInfo => ({
+    ...base,
+    partition: part,
+  });
+
+  // Safe: single-column RANGE with bounds, or a DEFAULT partition present.
+  assert.equal(
+    unroutablePartition(
+      withPart({
+        strategy: "range",
+        keyColumns: ["tenant"],
+        hasDefault: false,
+        ranges: [{ from: "0", to: "100" }],
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    unroutablePartition(
+      withPart({
+        strategy: "hash",
+        keyColumns: ["tenant"],
+        hasDefault: true,
+      }),
+    ),
+    null,
+  );
+
+  // Flagged: hash, expression (no key columns), multi-column, unparseable.
+  assert.match(
+    unroutablePartition(
+      withPart({ strategy: "hash", keyColumns: ["tenant"], hasDefault: false }),
+    ) ?? "",
+    /hash/,
+  );
+  assert.match(
+    unroutablePartition(
+      withPart({ strategy: "range", keyColumns: [], hasDefault: false }),
+    ) ?? "",
+    /expression/,
+  );
+  assert.match(
+    unroutablePartition(
+      withPart({
+        strategy: "range",
+        keyColumns: ["tenant", "id"],
+        hasDefault: false,
+        ranges: [{ from: "0", to: "1" }],
+      }),
+    ) ?? "",
+    /multi-column/,
+  );
 });
 
 test("self-referential FK points at an existing row or null", () => {

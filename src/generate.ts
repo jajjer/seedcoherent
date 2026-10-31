@@ -95,7 +95,11 @@ export interface AppendContext {
 }
 
 const NULL_PROBABILITY = 0.08;
-const UNIQUE_RETRIES = 25;
+// Attempts to find a fresh value for a unique constraint before giving up. High
+// enough that a domain only a little larger than the row count doesn't give up
+// prematurely (25 missed a 26-value / 26-row domain's last slot ~37% of the
+// time; 200 cuts that below 0.1%), while still bounding a truly exhausted one.
+const UNIQUE_RETRIES = 200;
 
 export function rowCount(table: TableInfo, config: Config): number {
   const byName = config.rows?.[table.name] ?? config.rows?.[table.key];
@@ -243,6 +247,31 @@ export function unsatisfiableRequiredFks(
 }
 
 /**
+ * Describes why a partitioned table's generated rows might not route to any
+ * partition, or null when routing is safe. A `DEFAULT` partition always accepts
+ * a row, so a table that has one is never flagged. Otherwise the generator can
+ * only confine a single-column RANGE/LIST key with parseable bounds; hash,
+ * expression, multi-column, and unparseable-bound keys are best-effort and may
+ * produce a value no partition covers (rejected at insert time unless coverage
+ * happens to be complete).
+ */
+export function unroutablePartition(table: TableInfo): string | null {
+  const p = table.partition;
+  if (!p || p.hasDefault) return null;
+  if (p.strategy === "hash") return "hash partitioning";
+  if (p.keyColumns.length === 0) return "an expression partition key";
+  if (p.keyColumns.length > 1) return "a multi-column partition key";
+  if (p.strategy === "range") {
+    const bounded = p.ranges?.some((r) => r.from !== null || r.to !== null);
+    if (!bounded) return "no parseable RANGE bounds";
+  }
+  if (p.strategy === "list" && !(p.list && p.list.length > 0)) {
+    return "no parseable LIST values";
+  }
+  return null;
+}
+
+/**
  * Generates rows table-by-table in dependency order, yielding them in batches
  * of at most `batchSize`. Exactly one batch per non-skipped table is flagged
  * `last` (possibly empty), so consumers can bracket each table even when it
@@ -322,6 +351,18 @@ export function* streamData(
     if (append && !append.generate.has(table.key)) continue;
 
     const emitCols = table.columns.filter((c) => emitsColumn(table, c, config));
+    // Warn when a partitioned table's key can't be confined to a covered
+    // partition and there's no DEFAULT — the insert may be rejected if coverage
+    // isn't complete. A warning, not an error, since coverage might be complete.
+    const unroutable = unroutablePartition(table);
+    if (unroutable) {
+      process.stderr.write(
+        `seedcoherent: ${table.key} is partitioned with ${unroutable} and no ` +
+          `DEFAULT partition; generated rows may not route to a partition and ` +
+          `the insert could be rejected. Add a DEFAULT partition or pin the key ` +
+          `with --column ${table.key}.<key>=value:<covered-value>.\n`,
+      );
+    }
     // Distill CHECK constraints into per-column bounds the generators honor.
     const checks = parseChecks(table.checks);
     // Pre-resolve a generator per non-FK column.
@@ -505,6 +546,16 @@ export function* streamData(
     }
 
     generated.set(table.key, rows);
+    // A short table means a unique constraint ran out of distinct values before
+    // the requested count. Previously this was silent; surface it so the caller
+    // knows the row count wasn't met (rather than discovering it downstream).
+    if (rows.length < count) {
+      process.stderr.write(
+        `seedcoherent: ${table.key} produced ${rows.length} of ${count} ` +
+          `requested rows — a UNIQUE constraint can't yield more distinct ` +
+          `values. Lower this table's count or widen the unique column's domain.\n`,
+      );
+    }
     // Always emit a final batch (even if empty) so consumers can bracket the
     // table and record it, matching buildData's one-entry-per-table output.
     yield { table, columns: emitCols, rows: pending, last: true };
