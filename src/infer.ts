@@ -567,22 +567,77 @@ function baseGenerator(table: TableInfo, col: ColumnInfo): Generator {
   return generatorForType(col);
 }
 
+/** Number of retries when sampling a string against a compiled regex. */
+const PATTERN_RETRIES = 40;
+
+/** Compile a CHECK regex, or null if the engine can't parse it. */
+function compilePattern(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does `v` satisfy every *other* recognized bound in `check`? Used to filter a
+ * membership (`IN`) set so a co-present range/length/pattern isn't ignored — the
+ * value still comes from the enumerated set, but only its in-bounds members.
+ */
+function allowedByCheck(v: string | number, check: ColumnCheck): boolean {
+  if (typeof v === "number") {
+    if (check.min !== undefined) {
+      if (check.minExclusive ? v <= check.min : v < check.min) return false;
+    }
+    if (check.max !== undefined) {
+      if (check.maxExclusive ? v >= check.max : v > check.max) return false;
+    }
+  } else {
+    if (check.minLength !== undefined && v.length < check.minLength)
+      return false;
+    if (check.maxLength !== undefined && v.length > check.maxLength)
+      return false;
+    if (check.pattern) {
+      const re = compilePattern(check.pattern);
+      if (re && !re.test(v)) return false;
+    }
+  }
+  return true;
+}
+
 /** Wrap a base generator so its output satisfies a column's CHECK bounds. */
 function applyCheck(
   base: Generator,
   col: ColumnInfo,
   check: ColumnCheck,
 ): Generator {
-  // A membership set fully determines the valid values — draw straight from it.
+  // A membership set enumerates the candidate values, but a co-present range,
+  // length, or pattern narrows it further — draw only from the members that also
+  // satisfy those. (An empty intersection is an impossible CHECK; keep the
+  // original set so we stay in membership rather than emit anything — a later
+  // hardening phase surfaces it up-front.)
   if (check.in && check.in.length > 0) {
-    const values = check.in;
+    const narrowed = check.in.filter((v) => allowedByCheck(v, check));
+    const values = narrowed.length > 0 ? narrowed : check.in;
     return (f) => f.helpers.arrayElement(values);
   }
 
-  // A regex fully dictates the string format (zip codes, product SKUs, ...).
+  // A regex dictates the string format (zip codes, product SKUs, ...).
   if (check.pattern) {
     const gen = patternGenerator(check.pattern);
     if (gen) return gen;
+    // Recognized but not samplable by the mini-engine: retry the base generator
+    // against the real regex instead of falling through to unconstrained text.
+    const re = compilePattern(check.pattern);
+    if (re) {
+      return (f) => {
+        for (let i = 0; i < PATTERN_RETRIES; i++) {
+          const s = String(base(f));
+          if (re.test(s)) return constrainLength(s, col, check, f);
+        }
+        return constrainLength(String(base(f)), col, check, f);
+      };
+    }
   }
 
   const isNumeric = col.dataType === "integer" || col.dataType === "decimal";
@@ -631,6 +686,14 @@ function boundedNumber(col: ColumnInfo, check: ColumnCheck): Generator {
   if (lo === undefined) lo = Math.min(0, hi!);
   if (hi === undefined) hi = lo + SPAN;
   if (lo > hi) hi = lo;
+  // An open-ended SPAN must not overflow numeric(p, s): the largest magnitude a
+  // numeric(p, s) holds is 10^(p-s) minus one scale unit.
+  if (col.numericPrecision != null && col.numericPrecision > 0) {
+    const limit = Math.pow(10, col.numericPrecision - scale) - eps;
+    hi = Math.min(hi, limit);
+    lo = Math.max(lo, -limit);
+    if (lo > hi) hi = lo;
+  }
   const [min, max] = [lo, hi];
   return (f) => f.number.float({ min, max, fractionDigits: scale });
 }
