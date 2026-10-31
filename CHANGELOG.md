@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] — 2026-10-31
+
+### Added
+
+- **`--cardinality`: bound how many children each parent collects.** `--distribution` shapes *how lopsided* a foreign-key fan-out is, but it can't *bound* it — each child still independently samples a parent, so there was no way to say "every user has 1–3 orders," "each order has exactly 3 line items," or enforce a 1:1 relationship. `--cardinality <childTable.fkColumn>=<spec>` adds the missing assignment model: `spec` is an exact count (`order_items.order_id=3`) or an inclusive range (`orders.user_id=1-3`), and seedcoherent draws a per-parent count in `[min, max]`, assigns parents to children so every parent lands in range, and **derives the child table's row count** from the sum of those draws (so a `--rows` for that table is ignored, with a one-time stderr note). `min=0` lets some parents be childless; an exact count on a `UNIQUE` foreign key yields a true 1:1. New `src/cardinality.ts` holds the resolution + assignment (`resolveCardinality`, `buildAssignment`, `perParentCounts`, `derivedRowCount`), consumed by `streamData` (which builds the parent→child assignment over the already-generated parent pool and indexes it by row position, so the UNIQUE-retry loop stays idempotent) and by the dry-run plan (`buildPlan`, which reports the exact derived count analytically from parent counts). Draws run through a per-table RNG seeded from `--seed` salted by the table key, isolated from the main generation stream, so a cardinality run leaves every non-cardinality column's seeded output byte-identical and the plan's count matches a seeded run exactly. Guards reject two specs on one table, a spec that also carries a `--distribution`, and a self-referential FK; a user `--cardinality` suppresses a profiled fan-out distribution on the same column. Pure generation logic — no engine emit/introspect/subset change, so it works across Postgres, MySQL, SQLite, and SQL Server alike.
+
 ## [0.32.1] — 2026-10-31
 
 ### Fixed

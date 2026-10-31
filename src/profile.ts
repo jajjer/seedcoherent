@@ -419,8 +419,19 @@ export async function buildProfile(
  */
 export function mergeProfile(config: Config, profiled: Config): Config {
   if (profiled.distributions) {
+    // A user --cardinality on an FK and a profiled fan-out distribution on the
+    // same column both decide parent selection, which the cardinality guard
+    // rejects. Cardinality is explicit, so it wins: drop the profiled
+    // distribution for any column the user bounded.
+    const profiledDist = config.cardinality
+      ? Object.fromEntries(
+          Object.entries(profiled.distributions).filter(
+            ([key]) => !coveredByCardinality(key, config.cardinality!),
+          ),
+        )
+      : profiled.distributions;
     config.distributions = {
-      ...profiled.distributions,
+      ...profiledDist,
       ...config.distributions,
     };
   }
@@ -432,6 +443,20 @@ export function mergeProfile(config: Config, profiled: Config): Config {
     config.until = profiled.until;
   }
   return config;
+}
+
+/**
+ * True if a profiled-distribution key (`schema.table.col`) refers to a column
+ * a cardinality spec covers. Matches the full key, the `table.col` tail, or the
+ * bare `col` — the same precedence `resolveCardinality` looks the spec up with.
+ */
+function coveredByCardinality(
+  key: string,
+  cardinality: Record<string, unknown>,
+): boolean {
+  const parts = key.split(".");
+  const forms = [key, parts.slice(-2).join("."), parts[parts.length - 1]];
+  return forms.some((f) => cardinality[f] !== undefined);
 }
 
 /** A one-line-per-fact human summary of what profiling derived, for stderr. */
