@@ -269,6 +269,68 @@ test("length CHECK forces a minimum string length", () => {
   }
 });
 
+test("IN + range CHECK draws only in-range members", () => {
+  // rating IN (1..5) AND rating <= 3 must never emit 4 or 5.
+  const t = table("reviews", {
+    columns: [idCol(), col("rating", { udtName: "int4" })],
+    primaryKey: ["id"],
+    checks: [
+      {
+        expr: "((rating = ANY (ARRAY[1, 2, 3, 4, 5])) AND (rating <= 3))",
+      },
+    ],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { reviews: 50 }, seed: 7 }),
+    "public.reviews",
+  );
+  for (const r of rows) {
+    const v = r.rating as number;
+    assert.ok([1, 2, 3].includes(v), `rating ${v} should be 1..3`);
+  }
+});
+
+test("a recognized-but-unsamplable regex CHECK still matches", () => {
+  // `\d` is recognized by the parser but the mini-sampler can't build it, so
+  // generation must retry-filter against the real regex, not emit free text.
+  const t = table("skus", {
+    columns: [idCol(), col("code", { udtName: "text" })],
+    primaryKey: ["id"],
+    checks: [{ expr: "(code ~ '^[A-Z]{2}\\d{4}$'::text)" }],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { skus: 20 }, seed: 8 }),
+    "public.skus",
+  );
+  const re = /^[A-Z]{2}\d{4}$/;
+  for (const r of rows)
+    assert.ok(re.test(r.code as string), `code "${r.code}" fails pattern`);
+});
+
+test("numeric CHECK lower bound can't overflow numeric(p, s)", () => {
+  // price >= 0 with an open-ended span must stay within numeric(4, 2) (< 100).
+  const t = table("items", {
+    columns: [
+      idCol(),
+      col("price", {
+        udtName: "numeric",
+        numericPrecision: 4,
+        numericScale: 2,
+      }),
+    ],
+    primaryKey: ["id"],
+    checks: [{ expr: "(price >= (0)::numeric)" }],
+  });
+  const rows = rowsFor(
+    build(schema(t), { rows: { items: 100 }, seed: 9 }),
+    "public.items",
+  );
+  for (const r of rows) {
+    const v = r.price as number;
+    assert.ok(v >= 0 && v < 100, `price ${v} outside numeric(4,2) range`);
+  }
+});
+
 test("user column override still wins over a CHECK bound", () => {
   const t = table("products", {
     columns: [idCol(), col("price", { udtName: "numeric" })],

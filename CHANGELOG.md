@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.2] — 2026-10-31
+
+### Fixed
+
+- **CHECK constraints that co-occur on one column are now layered, not first-match-wins.** `applyCheck` (`src/infer.ts`) previously returned on the first recognized shape, so a column with more than one bound could emit a value violating the others. (1) A membership CHECK combined with a range — `rating IN (1,2,3,4,5) AND rating <= 3` — drew from the full `IN` set and could emit 4 or 5; the set is now filtered to the members that also satisfy the co-present range/length/pattern before drawing. (2) A regex the parser *recognized* but the mini-sampler couldn't build (`\d`, backreferences, …) fell through to the **unconstrained** base generator, emitting free text that failed the pattern; generation now retry-filters the base generator against the real compiled regex instead. (3) `boundedNumber`'s open-ended span (`±1000`) could exceed a `numeric(p, s)` column's magnitude (e.g. `price >= 0` on `numeric(4,2)` emitting ≥ 100); the span is now clamped to `10^(p-s)`. (Correctness hardening, phase 2: CHECK constraint layering.)
+
 ## [0.32.1] — 2026-10-31
 
 ### Fixed
