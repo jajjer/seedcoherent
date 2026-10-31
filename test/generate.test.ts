@@ -170,6 +170,70 @@ test("self-referential FK points at an existing row or null", () => {
   }
 });
 
+test("self-referential NOT NULL FK with a uuid PK points row 0 at itself", () => {
+  // The first row has no earlier row and no synthetic integer id to peek, so it
+  // must reference its own (generated) PK rather than emit NULL.
+  const nodes = table("nodes", {
+    columns: [
+      col("id", { udtName: "uuid" }),
+      col("parent_id", { udtName: "uuid", nullable: false }),
+    ],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["parent_id"], "nodes", ["id"])],
+  });
+  const data = build(schema(nodes), { rows: { nodes: 10 }, seed: 5 });
+  const rows = rowsFor(data, "public.nodes");
+  const ids = new Set(rows.map((r) => r.id));
+  for (const r of rows) {
+    assert.notEqual(r.parent_id, null, "parent_id must never be NULL");
+    assert.ok(ids.has(r.parent_id), `parent_id ${r.parent_id} has no row`);
+  }
+  assert.equal(rows[0].parent_id, rows[0].id, "row 0 should reference itself");
+});
+
+test("an unsatisfiable NOT NULL FK cycle fails fast", () => {
+  // a.b_id → b and b.a_id → a, both NOT NULL: whichever is generated first has
+  // no parent rows, so this is unsatisfiable and must error up front.
+  const a = table("a", {
+    columns: [idCol(), col("b_id", { udtName: "int4", nullable: false })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["b_id"], "b", ["id"])],
+  });
+  const b = table("b", {
+    columns: [idCol(), col("a_id", { udtName: "int4", nullable: false })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["a_id"], "a", ["id"])],
+  });
+  assert.throws(
+    () => build(schema(a, b), { rows: { a: 5, b: 5 }, seed: 1 }),
+    /NOT NULL foreign key|NOT NULL FK cycle/,
+  );
+});
+
+test("a NOT NULL FK to a zero-row parent fails fast", () => {
+  assert.throws(
+    () =>
+      build(usersAndOrders(), {
+        rows: { users: 0, orders: 10 },
+        seed: 1,
+      }),
+    /parent has no rows/,
+  );
+});
+
+test("a nullable self-referential FK cycle still generates", () => {
+  // The manager_id cycle is nullable, so it must not trip the fail-fast guard.
+  const employees = table("employees", {
+    columns: [idCol(), col("manager_id", { udtName: "int4", nullable: true })],
+    primaryKey: ["id"],
+    foreignKeys: [fk(["manager_id"], "employees", ["id"])],
+  });
+  assert.equal(
+    rowsFor(build(schema(employees), { rows: { employees: 3 }, seed: 1 }), "public.employees").length,
+    3,
+  );
+});
+
 test("skipped tables are omitted from the output entirely", () => {
   const data = build(usersAndOrders(), {
     rows: { users: 5, orders: 5 },

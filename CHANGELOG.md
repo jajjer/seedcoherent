@@ -4,6 +4,12 @@ All notable changes to `seedcoherent` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.3] — 2026-10-31
+
+### Fixed
+
+- **NOT NULL foreign keys are never emitted as `NULL` anymore.** `graph.ts` promised cyclic tables a "nullable/deferred pass" in the generator, but the `cyclic` set it computed was threaded through `streamData` and never read, so two failure modes silently produced an invalid `NULL` (rejected at insert time): (1) a **self-referential NOT NULL FK on the first row** of a table whose PK is *not* a synthetic integer (a `uuid`/`text`/composite key) had no earlier row and no id to peek, so row 0 got `NULL`; it now references its own generated PK. (2) a **cross-table NOT NULL FK whose parent pool is empty** when the child generates — a true NOT NULL FK cycle, or a parent that was `--skip`ped or set to zero rows — was emitted as `NULL`. seedcoherent now **fails fast up front** with a clear message naming each offending `child (cols) → parent` and why (FK cycle vs. parent has no rows), instead of generating SQL the database will reject mid-transaction. New exported `unsatisfiableRequiredFks` (`src/generate.ts`) mirrors the existing `requiredUnsupportedColumns` preflight. (Correctness hardening, phase 3: FK NOT NULL integrity.)
+
 ## [0.32.2] — 2026-10-31
 
 ### Fixed

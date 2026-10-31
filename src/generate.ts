@@ -170,6 +170,73 @@ export function requiredUnsupportedColumns(
   return out;
 }
 
+/** A NOT NULL foreign key whose parent pool is empty when its table generates. */
+export interface UnsatisfiableFk {
+  /** Owning (child) table's `schema.table` key. */
+  table: string;
+  /** The child's FK columns. */
+  columns: string[];
+  /** Referenced parent table's key. */
+  refTable: string;
+  /** `cycle`: parent generates rows but only later (a NOT NULL FK cycle).
+   *  `empty-parent`: parent produces no rows at all (skipped / zero count). */
+  reason: "cycle" | "empty-parent";
+}
+
+/**
+ * Finds NOT NULL cross-table foreign keys that can't be satisfied: when the
+ * child table generates, the parent pool is empty — the parent sits later in the
+ * cycle-broken order (an unsatisfiable NOT NULL FK cycle), or it produces no rows
+ * (skipped, zero count, or not grown in append). Such a column would otherwise be
+ * emitted as NULL and rejected at insert time, so callers report it up front.
+ * Self-references are excluded — the generator points the first row at itself.
+ */
+export function unsatisfiableRequiredFks(
+  schema: Schema,
+  order: TableInfo[],
+  config: Config,
+  append?: AppendContext,
+): UnsatisfiableFk[] {
+  const skip = new Set(config.skip ?? []);
+  const willGenerate = (table: TableInfo): boolean =>
+    append
+      ? append.generate.has(table.key)
+      : !skip.has(table.name) &&
+        !skip.has(table.key) &&
+        rowCount(table, config) > 0;
+  const producesRows = (table: TableInfo): boolean =>
+    willGenerate(table) || (append?.existing.has(table.key) ?? false);
+
+  // Walk the generation order, tracking which parents already hold rows. A
+  // required FK to a table not yet available is unsatisfiable.
+  const available = new Set<string>();
+  if (append) for (const key of append.existing.keys()) available.add(key);
+
+  const out: UnsatisfiableFk[] = [];
+  for (const table of order) {
+    if (willGenerate(table)) {
+      for (const fk of table.foreignKeys) {
+        if (fk.refTable === table.key) continue; // self-ref handled in-generator
+        if (available.has(fk.refTable)) continue;
+        const required = fk.columns.some((cn) => {
+          const c = table.columns.find((x) => x.name === cn);
+          return c !== undefined && !c.nullable;
+        });
+        if (!required) continue;
+        const parent = schema.tables.get(fk.refTable);
+        out.push({
+          table: table.key,
+          columns: fk.columns,
+          refTable: fk.refTable,
+          reason: parent && producesRows(parent) ? "cycle" : "empty-parent",
+        });
+      }
+    }
+    if (producesRows(table)) available.add(table.key);
+  }
+  return out;
+}
+
 /**
  * Generates rows table-by-table in dependency order, yielding them in batches
  * of at most `batchSize`. Exactly one batch per non-skipped table is flagged
@@ -211,6 +278,28 @@ export function* streamData(
   // children can reference existing parents.
   if (append)
     for (const [key, rows] of append.existing) generated.set(key, rows);
+
+  // Fail fast if a NOT NULL FK can't be satisfied (parent generated later in a
+  // cycle, or produces no rows) — otherwise the column would be emitted as NULL
+  // and rejected at insert time.
+  const unsatisfiable = unsatisfiableRequiredFks(schema, order, config, append);
+  if (unsatisfiable.length > 0) {
+    const lines = unsatisfiable.map(
+      (u) =>
+        `  ${u.table} (${u.columns.join(", ")}) → ${u.refTable}` +
+        (u.reason === "cycle"
+          ? " — NOT NULL FK cycle"
+          : " — parent has no rows"),
+    );
+    throw new Error(
+      [
+        `Can't satisfy ${unsatisfiable.length} NOT NULL foreign key(s); the parent has no rows when the child is generated:`,
+        ...lines,
+        "",
+        "Make the FK column nullable, give the parent rows (don't --skip it / set a non-zero count), or for a true cycle use a DEFERRABLE constraint.",
+      ].join("\n"),
+    );
+  }
 
   // Temporal coherence: the causal window plus each table's creation column, so
   // a child's creation time can be floored at its parents'.
@@ -330,6 +419,7 @@ export function* streamData(
             rows,
             i,
             () => idCounter,
+            candidate,
           );
         }
         // Rewrite date/timestamp columns so this row's creation time follows the
@@ -568,6 +658,7 @@ function valueForColumn(
   currentRows: Row[],
   rowIndex: number,
   nextId: () => number,
+  candidate: Row,
 ): unknown {
   // 1. Synthetic PK id.
   if (
@@ -588,8 +679,14 @@ function valueForColumn(
       // Self-reference: point at an earlier row in this batch, or null.
       const nonNull = !col.nullable;
       if (rowIndex === 0)
+        // The only valid non-null target for the very first row is itself, so
+        // reference the referenced column's own value on this row. It's already
+        // populated for the usual case (the PK precedes the FK column); fall back
+        // to the synthetic-id peek for an integer PK, else null.
         return nonNull
-          ? (currentRows[0]?.[refCol] ?? nextIdPeek(table, nextId))
+          ? (candidate[refCol] ??
+              currentRows[0]?.[refCol] ??
+              nextIdPeek(table, nextId))
           : null;
       if (!nonNull && faker.datatype.boolean({ probability: 0.6 })) return null;
       const parent = faker.helpers.arrayElement(currentRows.slice(0, rowIndex));
